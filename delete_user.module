@@ -1,0 +1,134 @@
+	<?php
+	
+	/**
+	 * Implements hook_permission().
+	 *
+	 * In this example, we will use a simple permission to determine whether a user
+	 * has access to "user delete" . This permission is defined here.
+	 */
+	function delete_user_permission() {
+	  return array(
+	    'user delete account' => array(
+	      'title' => t('User Delete Link'),
+	      'description' => t('Permanently Delete User Account'),
+	       ),
+	    );
+	}
+	/**
+	  *
+	  * Implements hook_menu()
+	  * Redirect Path after user account is  deleted
+	  * @return
+	  *   $items array of menu items created programmatically
+	*/
+	function delete_user_menu() {
+    $items = array();
+	  $items['user/%user/delete'] = array(
+		  'page callback' => 'drupal_get_form',
+		  'page arguments' => array('delete_user_user_delete'),
+		  'title' => t('Delete My Account'),
+		  'access arguments' => array('user delete account'),
+		 );
+	  return $items;
+    }
+	/**
+	 *
+	 * function which returns user delete form
+	 * @return
+	 *   $form array of form fields
+	 */
+	function delete_user_users_delete($form, $form_state) {
+	  $form = array();
+	  $form['delete_account'] = array(
+		'#type' => 'container',
+	  );
+	  $form['delete_account']['user_email'] = array(
+		'#type' => 'textfield',
+		'#title' => t('Email'),
+		'#size' => 30,
+		'#description' => t('Enter Your Email Address'),
+	  );
+	  $form['delete_account']['user_password'] = array(
+		'#type' => 'password_confirm',
+	  );
+	  $form['submit_form'] = array(
+		'#type' => 'submit',
+		'#value' => t('Delete'),
+		'#submit' => array('delete_user_user_delete_submit'),
+	  );
+	  $form['#validate'] = array('delete_user_user_delete_validation');
+	  return $form;
+	}
+	
+	/**
+	 *
+	 * Validation function for custom user delete form
+	 * Validate if the email address input by the user is same as the email of curent logged in user.
+	 * validate the password input by the user
+	 */
+	function delete_user_user_delete_validation(&$form, &$form_state) {
+	  global $user;
+	  
+	  if ($form_state['values']['user_email'] != @$user->mail) {
+		form_set_error('user_email', t('please enter your email address'));
+	  }
+	  $uid = delete_user_user_authenticate($user, $form_state['values']['user_password']);
+	  if ($uid == 0 || $uid != $user->uid) {
+		form_set_error('user_password', 'authentication failed');
+	  }
+	  if ($uid == 1) {
+		form_set_error('user_password', 'Admin account can not be deleted');
+	  }
+	  return true;
+	}
+	
+	/**
+	 *
+	 * Submit function to delete user account
+	 */
+	function delete_user_user_delete_submit($form, $form_state) {
+	  global $user;
+	
+	  //$_SESSION['user_change']['uid'] = $user->uid;
+	  user_delete($user->uid);
+	  //drupal_goto(');
+	  if ($op == 'delete') {
+		$success_message = 'User Account with user uid' . $user->uid . ' has been deleted';
+	  }
+		drupal_set_message(t('User Account with user uid @var  has been deleted successfully...', array('@var' => $user->uid)), 'status');
+	  drupal_goto('<front>');
+	  return true;
+	}
+	
+	/**
+	 *
+	 * function to authenticate the password given by the logged in user
+	 */
+	
+	function delete_user_user_authenticate($account, $password) {
+	
+	  require_once DRUPAL_ROOT . '/' . variable_get('password_inc', 'includes/password.inc');
+	  if (@user_check_password($password, $account)) {
+	// Successful authentication.
+		$uid = $account->uid;
+	  }
+	  else {
+		$uid = 0;
+	  }
+	  return $uid;
+	}
+	/**
+	 *
+	 * function to add delete link on user profile page
+	 */
+	function delete_user_form_alter(&$form, $form_state, $form_id) {
+	  global $user;
+	 $user_delete= 'user/'. $user->uid .'/delete';
+	 if($form_id=='user_profile_form')
+	 {
+	   $form['actions']['delete'] = array(
+		  '#markup' => l(t('Delete Profile'),$user_delete ),
+		);
+	 }
+	}
+	

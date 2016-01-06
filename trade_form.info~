@@ -1,0 +1,13 @@
+name = Trades Praposal form
+description = Allow send praposal between users.
+dependencies[] = ctools
+dependencies[] = privatemsg
+core = 7.x
+
+
+name = Trades Praposal form
+description = Allow send praposal between users.
+core = 7.x
+package = Nirvana Canada
+dependencies[] = ctools
+dependencies[] = privatemsg

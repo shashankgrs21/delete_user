@@ -1,0 +1,3798 @@
+	<?php
+	
+	/**
+	   * Status constant for read messages.
+	 */
+	define('TRADES_READ', 0);
+	/**
+	 * Status constant for unread messages.
+	 */
+	define('TRADES_UNREAD', 1);
+	/**
+	 * Show unlimited messages in a thread.
+	 */
+	define('TRADES_UNLIMITED', 'unlimited');
+	
+	// $Id$
+	/**
+	* @file
+	* A module exemplifying Drupal coding practices and APIs.
+	*
+	* This module provides a block that lists all of the
+	* installed modules. It illustrates coding standards,
+	* practices, and API use for Drupal 7.
+	*/
+	/**
+	* Implements hook_help().
+	*/
+
+		function trade_form_help($path, $arg) {
+		if ($path == 'admin/help#first') {
+		return t('Make trade form only viewable by people with access to view trade form.');
+		}
+		}
+	
+	/**
+	 * Implements hook_permission().
+	 *
+	 * In this example, we will use a simple permission to determine whether a user
+	 * has access to "trade from" . This permission is defined here.
+	 */
+	function trade_form_permission() {
+	  return array(
+	    'user access trade form' => array(
+	      'title' => t('User access trade form'),
+	      'description' => t('Make trade form only viewable by people with access to view trade form'),
+	       ),
+	     'read trade_form' => array(
+	      'title' => t('Read trade_form messages'),
+	      'description' => t('Read private messages'),
+	    ),
+	    'read all trade_form messages' => array(
+	      'title' => t('Read all trade_form messages'),
+	      'description' => t('Includes messages of other users'),
+	    ),
+	    );
+	}
+	
+	/**
+	 * Implements hook_menu().
+	 */
+	function trade_form_menu() {
+	  $items['trade-proposal'] = array(
+	    'title'            => 'My Proposal',
+	    'title callback'   => 'trade_form_title_callback',
+	    'page callback'    => 'trade_form_list_page',
+	    'page arguments'   => array('list'),
+	    'file'             => 'trade_form.pages.inc',
+	    'access arguments' => array('user access trade form'),
+	    'type'             => MENU_LOCAL_ACTION,
+	    'menu_name'        => 'user-menu',
+	  );
+	  
+	$items['send-proposal'] = array(
+	      'title' => 'Trade Proposal Form', //page title
+	    'description' => 'A form to send proposal to other users.',
+	    'page callback' => 'drupal_get_form', //this is the function that will be called when the page is accessed.  for a form, use drupal_get_form
+	    'page arguments' => array('trade_form_form'), //put the name of the form here
+	    'access callback' => TRUE,
+	    
+	      'type' => MENU_CALLBACK,
+	      'access arguments' => array('user access trade form'),
+	      
+	      );  
+	      
+	      
+	      
+	   $items['user/%user/edit'] = array(
+	    'title'            => 'My account',
+	    'page callback'    => 'trade_form_list_page',
+	    'access arguments' => array('user access trade form'),
+	    'type'             => MENU_CALLBACK,
+	    'menu'             => 'user-menu',
+	  );
+	  $items['trade-proposal/view/%trade_form_thread'] = array(
+	    'title'            => 'My Proposal',
+	    'page callback'    => 'trade_form_view',
+	    'page arguments'   => array(2),
+	    'file'             => 'trade_form.pages.inc',
+	    'access callback'  => 'trade_form_view_access',
+	    'access arguments' => array(2),
+	    'type'             => MENU_NORMAL_ITEM,
+	    'menu_name'        => 'user-menu',
+	  );
+	  
+	  $items['accept-offer/%'] = array(
+	      'page callback' => 'trade_form_accept',
+	      'page arguments' => array(2),
+	      'type' => MENU_CALLBACK,
+	      'access arguments' => array('user access trade form'),
+	    );
+	 $items['decline-offer/%'] = array(
+	      'page callback' => 'trade_form_decline',
+	      'page arguments' => array(2),
+	      'type' => MENU_CALLBACK,
+	      'access arguments' => array('user access trade form'),
+	    );
+	$items['cancel-offer/%'] = array(
+	      'page callback' => 'trade_form_cancel',
+	      'page arguments' => array(2),
+	      'type' => MENU_CALLBACK,
+	      'access arguments' => array('user access trade form'),
+	    );
+	$items['trade-complete/%'] = array(
+	      'page callback' => 'trade_form_status_complete',
+	      'page arguments' => array(2),
+	      'type' => MENU_CALLBACK,
+	      'access arguments' => array('user access trade form'),
+	    );
+	
+	$items['meetup-location'] = array(
+	      'page callback' => 'ajax_trade_form_meetup_location_autolocation_callback',
+	      'page arguments' => array(2),
+	      'type' => MENU_CALLBACK,
+	      'access arguments' => array('user access trade form'),
+	    );
+	
+	  return $items;
+	}
+	
+	function ajax_trade_form_meetup_date_autocheckboxes_callback($form, $form_state){
+	    global $user;
+	    $array=array();
+	
+	    $message='Meetup date is : '.$form_state['values']['date'];
+	    $mids=$form_state['values']['thread_id'];
+	     $recipients=  str_replace('user_','',$form_state['values']['recipients']);
+	    
+	   // 1) Save the message body first.
+	    $args = array();
+	    $args['subject'] = 'Proposal';
+	    $args['author'] = $user->uid;
+	    $args['body'] = $message;
+	    $args['timestamp'] = REQUEST_TIME;
+	    $mid = db_insert('trade_message')
+	      ->fields($args)
+	      ->execute();
+	    // 2) Save message to recipients.
+	    // Each recipient gets a record in the trade_index table.
+	    $query = db_insert('trade_index')->fields(array('mid', 'thread_id', 'recipient', 'type', 'is_new', 'deleted'));  
+	    $query->values(array(
+	        'mid' => $mid,
+	        'thread_id' => $mids,
+	        'recipient' => $recipients,
+	        'type' => "USER",
+	        'is_new' => 1,
+	        'deleted' => 0,
+	      ));
+	    // We only want to add the author to the trade_index table, if the message has
+	    // not been sent directly to him.
+	      $query->values(array(
+	        'mid' => $mid,
+	        'thread_id' => $mids,
+	        'recipient' => $user->uid,
+	        'type' => 'USER',
+	        'is_new' => 0,
+	        'deleted' => 0,
+	      ));
+	    
+	   $query->execute();
+	    drupal_set_message("Meetup Date has been sent succesfully.");
+	    ctools_include('ajax');
+	    $commands[] = ctools_ajax_command_redirect('trade-proposal');
+	  return array('#type' => 'ajax', '#commands' => $commands);
+	
+	}
+	
+	function ajax_trade_form_meetup_location_autolocation_callback($form, $form_state)
+	{
+	  
+	    global $user;
+	    $array=array();
+	
+	  $location=explode("_",$form_state['values']['location']);
+	  if($location[0]=='node'){
+	   $nodes=node_load($location[1]);
+	   $message=get_city_by_node($nodes);
+	  }
+	  else{
+	     $field_meet_up_location=(user_load($location[1])->field_meet_up_location);
+	        $message= address_format($field_meet_up_location);
+	  }
+	
+	
+	    $message='Meetup location is : '.$message;
+	    $mids=$form_state['values']['thread_id'];
+	     $recipients=  str_replace('user_','',$form_state['values']['recipients']);
+	   
+	    // 1) Save the message body first.
+	    $args = array();
+	    $args['subject'] = 'Proposal';
+	    $args['author'] = $user->uid;
+	    $args['body'] = $message;
+	    $args['timestamp'] = REQUEST_TIME;
+	    $mid = db_insert('trade_message')
+	      ->fields($args)
+	      ->execute();
+	   
+	     // 2) Save message to recipients.
+	    // Each recipient gets a record in the trade_index table.
+	    $query = db_insert('trade_index')->fields(array('mid', 'thread_id', 'recipient', 'type', 'is_new', 'deleted'));  
+	    $query->values(array(
+	        'mid' => $mid,
+	        'thread_id' => $mids,
+	        'recipient' => $recipients,
+	        'type' => "USER",
+	        'is_new' => 1,
+	        'deleted' => 0,
+	      ));
+	    // We only want to add the author to the trade_index table, if the message has
+	    // not been sent directly to him.
+	      $query->values(array(
+	        'mid' => $mid,
+	        'thread_id' => $mids,
+	        'recipient' => $user->uid,
+	        'type' => 'USER',
+	        'is_new' => 0,
+	        'deleted' => 0,
+	      ));
+	    
+	   $query->execute();
+	     drupal_set_message("Meetup Location has been sent succesfully.");
+	     ctools_include('ajax');
+	     $commands[] = ctools_ajax_command_redirect('trade-proposal');
+	    return array('#type' => 'ajax', '#commands' => $commands);
+	}
+	function ajax_trade_form_modify_callback($form, $form_state)
+	{
+	  
+	    global $user;
+	    $array=array();
+	    $array2=array();
+	    $array1=array();
+		$p_message='';
+		$dates='';
+		$location='';
+	    $location=$form_state['values']['location'];
+		$dates=$form_state['values']['date'];
+		$p_message=$form_state['values']['message'];
+	    $proposal_id=$form_state['values']['proposal_id'];
+	    $ouser_node_id=$form_state['values']['ouser_node_id'];
+		
+		
+	    $recipient=node_load($ouser_node_id);
+	    $mids=$form_state['values']['thread_id'];
+		 
+		 
+	    $author_uid=$form_state['values']['author_uid'];
+	     $recipients=  str_replace('user_','',$form_state['values']['recipients']);
+	    trade_form_delete_rel_mid($proposal_id, $mids);
+	
+	   foreach($form_state['values']['cuser_node_id'] as $keys=>$values)
+	    {
+	      if($values!='')
+	      {
+	        $node=node_load($values);
+	        $array2[$node->nid]= $node->title;
+	       
+	       }
+	    }
+	
+	    foreach($form_state['values']['ouser_node_offers_id'] as $key=>$valuess)
+	    {
+	      if($valuess!='')
+	      {
+	        $node=node_load($valuess);
+	        $array1[$node->nid]= $node->title;
+	       
+	       }
+	    }
+	  
+	
+	    
+	    $message= $user->name.' offer to you '.implode(",",$array2) .' he want to you '. implode(",",$array1) .' on your '. $recipient->title.' wish ';
+	
+	  
+	   
+	    // 1) Save the message body first.
+	    $args = array();
+	    $args['subject'] = 'Proposal';
+	    $args['author'] = $user->uid;
+	    $args['body'] = $message;
+	    $args['timestamp'] = REQUEST_TIME;
+	    $mid = db_insert('trade_message')
+	      ->fields($args)
+	      ->execute();
+	   
+	     // 2) Save message to recipients.
+	    // Each recipient gets a record in the trade_index table.
+	    $query = db_insert('trade_index')->fields(array('mid', 'thread_id', 'recipient', 'type', 'is_new', 'deleted'));  
+	    $query->values(array(
+	        'mid' => $mid,
+	        'thread_id' => $mids,
+	        'recipient' => $recipients,
+	        'type' => "USER",
+	        'is_new' => 1,
+	        'deleted' => 0,
+	      ));
+	    // We only want to add the author to the trade_index table, if the message has
+	    // not been sent directly to him.
+	      $query->values(array(
+	        'mid' => $mid,
+	        'thread_id' => $mids,
+	        'recipient' => $user->uid,
+	        'type' => 'USER',
+	        'is_new' => 0,
+	        'deleted' => 0,
+	      ));
+	    
+	   $query->execute();
+	
+	// We only want to add the offer node for wish to the trade_relations table, if the message has
+	    // not been sent directly to him.
+	    $querys = db_insert('trade_relations')->fields(array('author', 'mid', 'cuser_node_id',  'ouser_node_id','proposal_id','p_dates_time','p_location','p_message','type'));  
+	    foreach($array2 as $key=>$val)
+	    {
+	         $querys->values(array(
+	          'author' => $author_uid,
+	          'mid' => $mids,
+	          'cuser_node_id' => $key,
+	          'ouser_node_id' => $ouser_node_id,
+			  'proposal_id' =>$proposal_id,
+			  'p_dates_time' =>$dates,
+			  'p_location' =>$location,
+			  'p_message' =>$p_message, 
+	          'type' => 'user_offers'
+	          ));
+	    }
+	    
+	   
+	    
+	    foreach($array1 as $key=>$val)
+	    {
+	         $querys->values(array(
+	           'author' => $author_uid,
+	           'mid' => $mids,
+	           'cuser_node_id' => $key,
+	           'ouser_node_id' => $ouser_node_id,
+			   'proposal_id' =>$proposal_id,
+			   'p_dates_time' =>$dates,
+			   'p_location' =>$location,
+			   'p_message' =>$p_message, 
+	           'type' => 'node_offers'
+	           ));
+	    }
+	    $querys->execute();
+	
+	
+	       drupal_set_message("Your message has been sent succesfully..");
+	
+	  ctools_include('ajax');
+	  $commands[] = ctools_ajax_command_redirect('trade-proposal');
+	  return array('#type' => 'ajax', '#commands' => $commands);
+	}
+	function trade_form_menu_alter(&$items) {
+	        $items['user/%user/edit']['title'] = t('My Account');
+	
+	     }
+	  
+	 /*
+	    * Implements nirvana_iteme_inactive_node()
+	    * this hook used for make wish and offer inactive or active.
+	    * This hook based on node module. 
+	    */
+	
+	    function trade_form_accept() 
+	    {
+	        global $user, $base_url;
+	        
+	        $mid = arg(1);
+	        $thread=trade_form_trade_index_mid_list($mid);
+	        $rows = array();
+	        foreach ($thread as $row) {
+	         $num_updated = db_update('trade_message') // Table name no longer needs {}
+	            ->fields(array(
+	              'has_tokens' => 1,
+	            ))
+	            ->condition('mid', $row->mid, '=')
+	            ->execute();
+	        }
+	         drupal_set_message(t('Trade offer has been successfully accepted...'), 'status');
+	         drupal_goto('trade-proposal');
+	    }
+	    
+	    function trade_form_decline() 
+	    {
+	        global $user, $base_url;
+	        
+	        $mid = arg(1);
+	        $thread=trade_form_trade_index_mid_list($mid);
+	        $rows = array();
+	        foreach ($thread as $row) {
+	         $num_updated = db_update('trade_message') // Table name no longer needs {}
+	            ->fields(array(
+	              'has_tokens' => 3,
+	            ))
+	            ->condition('mid', $row->mid, '=')
+	            ->execute();
+	        }
+	        drupal_set_message("Trade Proposal has been successfully completed.");
+	        drupal_set_message(t('Trade offer has been successfully declined...'), 'status');
+	        drupal_goto('trade-proposal');
+	     
+	    }
+	
+	      function trade_form_status_complete() 
+	    {
+	        global $user, $base_url,$node;
+	
+	        $mid = arg(1);
+	        $user_id='user/'.$_GET['user'];
+	        $thread=trade_form_trade_index_mid_list($mid);
+	        $rows = array();
+	        foreach ($thread as $row) {
+	         $num_updated = db_update('trade_message') // Table name no longer needs {}
+	            ->fields(array(
+	              'has_tokens' => 5,
+	            ))
+	            ->condition('mid', $row->mid, '=')
+	            ->execute();
+	        }
+	        drupal_set_message("Trade Proposal has been completed successfully .");
+	        $horrible ='<a data-toggle="tab" role="tab" href="#tab4" aria-expanded="true">Reviews</a>';
+	        drupal_set_message(t('Please give your valuable <a data-toggle="tab" role="tab" href="#tab4" aria-expanded="true">Reviews</a>.'),'status');
+	        drupal_goto($user_id);
+	     
+	    }
+	
+	  function trade_form_complete_callback($form, &$form_state){
+	   global $user, $base_url;
+	    if(isset($form_state['values']['ouser_node_id']))
+	    {
+	        trade_form_change_node_status($form_state['values']['ouser_node_id']);
+	    }
+	    if(isset($form_state['values']['cuser_node_id']))
+	    {
+	        trade_form_change_node_status($form_state['values']['cuser_node_id']);
+	    }
+	    $mid = $form_state['values']['thread_id'];
+	    $thread=trade_form_trade_index_mid_list($mid);
+	      $num_updated=fetch_trade_token($mid);
+	          if($num_updated[0]->has_tokens='1'){
+	          db_delete('trade_relations')
+	             ->condition('mid', $mid)
+	       ->execute();
+	
+	          db_delete('trade_index')
+	          ->condition('thread_id', $mid)
+	          ->execute();
+	
+	    foreach ($thread as $row) {
+	    $mid=$row->mid;
+	    db_delete('trade_message')
+	        ->condition('mid', $mid)
+	        ->execute();
+	  }
+	  
+	         drupal_set_message("Trade Proposal mark completed has been successfully.");
+	         
+	        }
+	  else{
+	  drupal_set_message("You are not authorized to access this page.");
+	       }
+	       ctools_include('ajax');
+	  $commands[] = ctools_ajax_command_redirect('trade-proposal');
+	  return array('#type' => 'ajax', '#commands' => $commands);
+	  }
+	
+	function trade_form_change_node_status($data)
+	{
+	 global $user, $base_url;
+	 foreach($data as $value)
+	   {
+	     if($value!='0' )
+	     { 
+	      $node = node_load($value);
+	        if ($node->uid == $user->uid) 
+	          {
+	          
+	            if ($node->status == '1') 
+	            {
+	              $node->status = '0';
+	              node_save($node);
+	              
+	            }
+	            
+	          }
+	      }
+	    }
+	}
+	function fetch_trade_token($mid)
+	{
+	$num_updated = db_select('trade_message', 'r')
+	    ->fields('r')
+	    ->condition('mid', $mid, '=')
+	    ->execute()
+	    ->fetchAll();
+	return $num_updated;
+	}
+	function trade_form_cancel() 
+	{
+	global $user, $base_url;
+	
+	$mid = arg(1);
+	$thread=trade_form_trade_index_mid_list($mid);
+	$rows = array();
+	foreach ($thread as $row) {
+	 $num_updated = db_update('trade_message') // Table name no longer needs {}
+	    ->fields(array(
+	      'has_tokens' => 2,
+	    ))
+	    ->condition('mid', $row->mid, '=')
+	    ->execute();
+	}
+	drupal_set_message(t('Trade offer has been successfully cancelled...'), 'status');
+	 drupal_goto('trade-proposal');
+	}
+	
+	/*
+	 * Implements trade_form_info
+	 */
+	function trade_form_block_info() {
+	    
+	    $block = array();
+	
+	    // Sign up block
+	    $block['trade_form'] = array(
+	                'info' =>   t('Trade Proposal Form Block'),
+	                'weight' => 0);  
+	
+	    return $block;
+	}
+	
+	
+	
+	/*
+	 * Implements hook_block_view
+	 */
+	function trade_form_block_view($delta) {
+	    
+	    $block = array();
+	
+	    switch($delta) {
+	        case 'trade_form':
+	            $block['title'] = t('Trade Proposal Form Block');
+	            $block['content'] = drupal_get_form('trade_form_form'); 
+	            break;
+	    }
+	
+	    return $block;
+	}
+	
+	
+	
+	
+	function trade_form_rate_the_room_form($form, &$form_state,$nodeid='',$author_id='') {
+	  
+	  # the options to display in our checkboxes
+	    
+	global $user,$base_url;
+	      $locations =array();
+	      $author_loacation='';
+	      $trade_form_date_time_format=array();
+	      $date='';
+		  $p_location='';
+		 $p_messages='';
+		 $p_dates_time='';
+	 if (arg(0) == 'node' && is_numeric(arg(1)))
+	  {
+	     $nodeid = arg(1);
+	     $node  = node_load( $nodeid);
+	     $title = $node->title;
+	     $user_id=$user->uid;
+	     
+	  }
+	  else{
+	     $nodeid=@$_GET['proposalsend'];
+	     $node  = node_load($nodeid);
+	     $title = $node->title;
+	     $user_id=$user->uid;
+	     //$user_id=$author_id;
+	   }
+	  $cuser_name=ucfirst(user_load($user->uid)->name);
+	  if (trade_form_check_user_send($nodeid, $user_id)) { $locations =array();
+	      
+	  
+	    
+	    $author_uid=$user_id;
+	    $nid=$nodeid;
+	   //$form=trade_form_edit_proposal($nodeid,$user_id) ;
+	   if($author_uid=='')
+	  {
+	    $user_uid=$user->uid;
+	  }
+	 else{
+	     $user_uid=$author_uid;
+	}
+	
+	  //$form = array();
+	
+	  $wish_node=(node_load($nodeid));
+	  $wish_node->field_deal_agreement['und'][0]['value']=='Free';
+	
+	   $deal_agreement= $wish_node->field_deal_agreement['und'][0] ['value']."," ;
+	   $deal_agreement .= "Free";
+	 
+	   $toppings =trade_form_my_offer($user_uid,$wish_node->field_type['und'][0] ['value'],$deal_agreement);
+	  
+	   $toppings1=trade_form_current_node($nid);
+	   $user_name=ucfirst(trade_form_current_node_user_name($nid));
+	   $current_node_user_offer=trade_form_current_node_user_offer($nid,$deal_agreement);
+	   
+	   $node = node_load($nid);
+	   $title = $node->title;
+	   $mid=trade_form_mid($nodeid, $user_uid);
+	   $trade_relations=trade_form_trade_relations_value($nodeid, $user_uid,$mid);
+	    
+	    $indexes=array();
+	    foreach($trade_relations as $key=>$value):
+	        $indexes[$value->cuser_node_id] = $value->cuser_node_id;
+	    endforeach;
+	 
+	 
+	  $trade_wish_relations=trade_form_trade_relations_wish_value($nid, $user_uid,$mid);
+	   $indexes_wish=array();
+	    foreach($trade_wish_relations as $key=>$value):
+	        $indexes_wish[$value->ouser_node_id] = $value->ouser_node_id;
+	    endforeach;
+	  # the drupal checkboxes form field definition
+	  
+	     
+	      $valuess=@address_format($wish_node->field_meet_up_location);
+	      $loacation_option ="node_$wish_node->nid";
+	      $locations[$loacation_option] =  $valuess;
+	      
+	      
+	      $field_meet_up_location=(user_load($wish_node->uid)->field_meet_up_location);
+	      
+	      $recipient_loacation= address_format($field_meet_up_location);
+	      $loacation_option ="user_$wish_node->uid";
+	      
+	      $locations[$loacation_option] =  $recipient_loacation;
+	
+	      @$author_loacation= address_format(user_load($user->uid)->field_meet_up_location);
+	      $loacation_option = "user_$user->uid";
+	      $locations[$loacation_option] =  $author_loacation;
+	 
+	      $date=trade_form_field_meet_up_date_avai($wish_node->field_meet_up_date_avai);
+	      $trade_form_date_time_format[]=$date;
+	  
+	     $p_location=trade_form_proposal_location($nodeid, $user->uid,$order='DESC');
+		 $p_messages=trade_form_proposal_messages($nodeid, $user->uid,$order='DESC');
+		 $p_dates_time=trade_form_proposal_dates_time($nodeid, $user->uid,$order='DESC');
+	    
+	    if(($wish_node->field_type['und'][0] ['value']=='offer' || $wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Free' || $wish_node->field_deal_agreement['und'][0]['value']=='Share: Borrow/ Lend'))
+	    {
+	     $types=ucfirst($wish_node->field_type['und'][0]['value']);
+	     if(($wish_node->field_type['und'][0] ['value']=='offer')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Free' || $wish_node->field_deal_agreement['und'][0]['value']=='Share: Borrow/ Lend')){
+	      $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	                Choose a date and a meetup location.
+	           </h2>',
+	        );
+	      }
+	      if(($wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Free' )){
+	      $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	                 What do you have to fulfil this wish?
+	           </h2>',
+	        );
+	      }
+	      else if(($wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Share: Borrow/ Lend')){
+	      $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	                What do you have to fulfil this share request?
+	           </h2>',
+	        );
+	      }
+
+
+	      $form['rate_the_room']['ouser_node_id'] = array(
+	        '#title' => t("<h3>$user_name $types<span>*</span></h3>"),
+	        '#type' => 'checkboxes',
+	        '#options' => $toppings1,
+	        '#required' => true,
+	        '#default_value' => array($nodeid),
+	        '#attributes' => array('class' => array('trade_offer_check')),
+	      );
+	       if($wish_node->field_type['und'][0] ['value']=='offer')
+	      {
+	         trade_form_ini($locations);
+	       $form['rate_the_room']['location'] = array(
+	           '#title' => t("<h3>Location</h3>"),
+	       '#type' => 'textarea',
+		     '#default_value' =>$p_location,
+	       '#attributes' => array('id' => array('altFieldlocaltion')),);
+	    
+	
+	       $form['rate_the_room']['date']= array(
+	            '#title' => t("<h3>Date Time</h3>"),
+	            '#type' => 'textarea', 
+	          '#default_value' =>$p_dates_time,
+	            '#attributes' => array('id' => array('altField')),);
+	
+	          
+	          $array=trade_form_date_widget_format($trade_form_date_time_format);
+	          drupal_add_js(drupal_get_path('module', 'trade_form') . '/jquery-ui.js');
+	          drupal_add_css(drupal_get_path('module', 'trade_form') . '/jquery-ui.css');
+	          drupal_add_js(drupal_get_path('module', 'trade_form') . '/jquery.datePicker.js');
+	          drupal_add_js('var $j = jQuery.noConflict();
+	           $j(document).ready(function() {
+	           var array = ['.implode(",",$array).'];
+	           $j("#fromDate").multiDatesPicker({
+	            altField: "#altField",
+	              dateFormat: "yy-mm-dd",
+	             beforeShowDay: function(date) {
+	            if($j.inArray($j.datepicker.formatDate("yy-mm-dd", date ), array) > -1)
+	            {
+	              return [true,"event","Available"];
+	            }
+	            else
+	            {
+	              return [false,"","Not Available"];
+	            }
+	          }
+	          });
+	       
+	        });','inline');
+	
+	    
+	      }
+
+	      if($wish_node->field_type['und'][0] ['value']=='wish')
+	      {
+	     
+	       $form['rate_the_room']['cuser_node_id'] = array(
+	         '#title' => t("<h3>$cuser_name Offers<span>*</span></h3>"),
+	         '#type' => 'checkboxes',
+	         '#options' => $toppings,
+	         '#required' => true,
+	         '#default_value' => $indexes,
+	         '#attributes' => array('class' => array('trade_offer_check')),
+	       );
+	      }
+	    }
+	    else{
+	       $cuser_name=ucfirst(user_load($user_uid)->name);
+	      if(($wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Trade'))
+	      {
+	        
+			
+
+
+
+	      if($form_state['stage']=='rate_the_room') { 
+              $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	              What do you have to fulfil this wish? <br/>
+	            
+	           </h2>',
+	        );
+	          
+	       $form['rate_the_room']['ouser_node_id'] = array(
+	      '#title' => t("<h3>$user_name Wishes<span>*</span></h3>"),
+	      '#type' => 'checkboxes',
+	      '#options' => $toppings1,
+	      '#required' => true,
+	      '#default_value' => array($nid),
+	      '#attributes' => array('class' => array('trade_offer_check')),
+	    );
+	    $form['rate_the_room']['ouser_node_offers_id'] = array(
+	      '#title' => t("<h3>$user_name Offers<span>*</span></h3>"),
+	      '#type' => 'checkboxes',
+	      '#required' => true,
+	      '#options' => $current_node_user_offer,
+	      '#default_value' => $indexes,
+	      '#attributes' => array('class' => array('trade_offer_check')),
+	    );
+	      
+	        
+               }
+	    else{
+           $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	           
+	              What would you like in return as a trade?
+	           </h2>',
+	        );
+		 $form['rate_the_room']['cuser_node_id'] = array(
+	      '#title' => t("<h3>$cuser_name Offers<span>*</span></h3>"),
+	      '#type' => 'checkboxes',
+	      '#options' => $toppings,
+	      '#required' => true,
+	      '#default_value' => $indexes,
+	      '#attributes' => array('class' => array('trade_offer_check')),
+	    );
+	    
+	   
+	    $form['rate_the_room']['ouser_node_offers_id'] = array(
+	      '#title' => t("<h3>$user_name Offers<span>*</span></h3>"),
+	      '#type' => 'checkboxes',
+	      '#required' => true,
+	      '#options' => $current_node_user_offer,
+	      '#default_value' => $indexes,
+	      '#attributes' => array('class' => array('trade_offer_check')),
+	    );
+                //  $form['rate_the_second']['#theme'][] = 'trade_form_form';
+		 $form['rate_the_room']['back'] = array(
+			    '#type' => 'submit',
+			    '#value' => t('Back')
+			  );
+
+	     }
+
+
+	      }
+	      else{
+	    $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	                What do you have to offer as a trade?  Try to pick something they are wishing for.  Or you can send them an invitation to choose for themselves???
+	           </h2>',
+	        );
+
+
+$cuser_name=ucfirst(user_load($user_uid)->name);
+	    $form['rate_the_room']['cuser_node_id'] = array(
+	      '#title' => t("<h3>$cuser_name Offers<span>*</span></h3>"),
+	      '#type' => 'checkboxes',
+	      '#options' => $toppings,
+	      '#required' => true,
+	      '#default_value' => $indexes,
+	      '#attributes' => array('class' => array('trade_offer_check')),
+	    );
+	    
+	     $trade_form_wish_mid= trade_form_wish_mid($nid, $user_uid);
+		 $current_node_user_wish=trade_form_current_node_user_wish($nodeid,$deal_agreement);
+	    	 $form['rate_the_room']['ouser_node_id'] = array(
+				'#type' => 'radios',
+				'#title' => t("<h3>$user_name Wishes<span>*</span></h3>"),
+				'#options' => $current_node_user_wish,
+				'#required' => true,
+				'#default_value' => $trade_form_wish_mid,
+				'#attributes' => array('class' => array('trade_offer_check'))
+				);
+			 
+	    $form['rate_the_room']['ouser_node_offers_id'] = array(
+	      '#title' => t("<h3>$user_name Offers<span>*</span></h3>"),
+	      '#type' => 'checkboxes',
+	      '#required' => true,
+	      '#options' => $current_node_user_offer,
+	      '#default_value' => $indexes,
+	      '#attributes' => array('class' => array('trade_offer_check')),
+	    );
+
+	      }
+	  
+	    
+	    }
+	     $form['rate_the_room']['author_id'] = array(
+	             '#type' => 'value',
+	             '#value' => $user_uid,
+	           );
+	    if(($wish_node->field_type['und'][0] ['value']=='offer')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Free' || $wish_node->field_deal_agreement['und'][0]['value']=='Share: Borrow/ Lend'))
+	    {
+	     $form['rate_the_room']['message'] = array(
+	           '#title' => t("<h3>Message</h3>"),
+	       '#type' => 'textarea',
+		     '#default_value' => $p_messages,
+	       '#attributes' => array('id' => array('proposal_message')),);
+	    $form['rate_the_room']['next'] = array(
+	        '#type' => 'submit',
+	        '#value' => t('Send Proposal'),
+	        '#weight' => 10,
+	        '#validate' => array('trade_form_form_validate'),
+	          '#attributes'=>array('class' => array('button_right', 'button', 'radius')),
+	        '#submit' => array('trade_form_edit_result'),
+	    );
+	    }
+	    else{
+	     $form['rate_the_room']['next'] = array(
+	        '#type' => 'submit',
+	        '#value' => t('Next'),
+	        '#weight' => 10,
+	        '#validate' => array('trade_form_form_validate'),
+	          '#attributes'=>array('class' => array('button_right', 'button', 'radius')),
+	        //'#submit' => array('trade_form_form_submit'),
+	    );
+	    }
+	    
+	    $form['rate_the_room']['#theme'][] = 'trade_form_form';
+	
+	  }
+	  else {
+	   $wish_node=(node_load($nodeid));
+	   
+	   
+	  
+	  
+	   $deal_agreement= $wish_node->field_deal_agreement['und'][0] ['value']."," ;
+	   $deal_agreement .= "Free";
+	
+	   $toppings =trade_form_my_offer($author_uid='',$wish_node->field_type['und'][0] ['value'],$deal_agreement);
+	 
+	   $toppings1=trade_form_current_node($nodeid);
+	   $user_name=ucfirst(trade_form_current_node_user_name($nodeid));
+	   $current_node_user_offer=trade_form_current_node_user_offer($nodeid,$deal_agreement);
+	    # the drupal checkboxes form field definition
+	    
+	
+	     
+	    $valuess=@address_format($wish_node->field_meet_up_location);
+	      $loacation_option ="node_$wish_node->nid";
+	      $locations[$loacation_option] =  $valuess;
+	      
+	      
+	      $field_meet_up_location=(user_load($wish_node->uid)->field_meet_up_location);
+	     
+	      $recipient_loacation= address_format($field_meet_up_location);
+	      $loacation_option ="user_$wish_node->uid";
+	      
+	      $locations[$loacation_option] =  $recipient_loacation;
+	
+	      @$author_loacation= address_format(user_load($user->uid)->field_meet_up_location);
+	      $loacation_option = "user_$user->uid";
+	      $locations[$loacation_option] =  $author_loacation;
+	      
+	   
+	      
+	      
+	   
+	      $date=trade_form_field_meet_up_date_avai($wish_node->field_meet_up_date_avai);
+	      $trade_form_date_time_format[]=$date;
+	  
+	 
+	    if(($wish_node->field_type['und'][0] ['value']=='offer' || $wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Free' || $wish_node->field_deal_agreement['und'][0]['value']=='Share: Borrow/ Lend'))
+	    {
+	      if(($wish_node->field_type['und'][0] ['value']=='offer')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Free' || $wish_node->field_deal_agreement['und'][0]['value']=='Share: Borrow/ Lend')){
+	      $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	                Choose a date and a meetup location.
+	           </h2>',
+	        );
+	      }
+	      if(($wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Free' )){
+	      $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	                 What do you have to fulfil this wish?
+	           </h2>',
+	        );
+	      }
+	      else if(($wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Share: Borrow/ Lend')){
+	      $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	                What do you have to fulfil this share request?
+	           </h2>',
+	        );
+	      }
+	     $types=ucfirst($wish_node->field_type['und'][0]['value']);
+	      $form['rate_the_room']['ouser_node_id'] = array(
+	        '#title' => t("<h3>$user_name $types<span>*</span></h3>"),
+	        '#type' => 'checkboxes',
+	        '#options' => $toppings1,
+	        '#required' => true,
+	        '#default_value' => array($nodeid),
+	        '#attributes' => array('class' => array('trade_offer_check')),
+	      );
+	      if($wish_node->field_type['und'][0] ['value']=='offer')
+	      {
+	         trade_form_ini($locations);
+	       $form['rate_the_room']['location'] = array(
+	       '#title' => t("<h3>Location</h3>"),
+	       '#type' => 'textarea',
+	       '#attributes' => array('id' => array('altFieldlocaltion')),);
+	   // '#options' => $locations,
+	  
+	      $form['rate_the_room']['date']= array(
+	            '#title' => t("<h3>Date Time</h3>"),
+	            '#type' => 'textarea', 
+	          
+	            '#attributes' => array('id' => array('altField')),);
+	
+	        $array=trade_form_date_widget_format($trade_form_date_time_format);
+	          drupal_add_js(drupal_get_path('module', 'trade_form') . '/jquery-ui.js');
+	          drupal_add_css(drupal_get_path('module', 'trade_form') . '/jquery-ui.css');
+	          drupal_add_js(drupal_get_path('module', 'trade_form') . '/jquery.datePicker.js');
+	          drupal_add_js('var $j = jQuery.noConflict();
+	           $j(document).ready(function() {
+	           var array = ['.implode(",",$array).'];
+	           $j("#fromDate").multiDatesPicker({
+	            altField: "#altField",
+	              dateFormat: "yy-mm-dd",
+	             beforeShowDay: function(date) {
+	            if($j.inArray($j.datepicker.formatDate("yy-mm-dd", date ), array) > -1)
+	            {
+	              return [true,"event","Available"];
+	            }
+	            else
+	            {
+	              return [false,"","Not Available"];
+	            }
+	          }
+	          });
+	       
+	        });','inline');
+	      }
+	      if(!empty($toppings)){
+	      if($wish_node->field_type['und'][0] ['value']=='wish')
+	      {
+	      
+	        $form['rate_the_room']['cuser_node_id'] = array(
+	        '#title' => t('<h3>My Offers<span>*</span></h3>'),
+	        '#type' => 'checkboxes',
+	        '#options' => $toppings,
+	        '#required' => true,
+	        '#attributes' => array('class' => array('trade_offer_check')),
+	      );
+	      }
+	    }
+	   
+	  
+	    
+	    }
+	    else{
+	      if(($wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Trade'))
+	      {
+
+	      if($form_state['stage']=='rate_the_room') { 
+              $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	              What do you have to fulfil this wish? <br/>
+	            
+	           </h2>',
+	        );
+	       
+	         $form['rate_the_room']['cuser_node_id'] = array(
+	          '#title' => t('<h3>My Offers<span>*</span></h3>'),
+	          '#type' => 'checkboxes',
+	          '#options' => $toppings,
+	          '#required' => true,
+	          '#attributes' => array('class' => array('trade_offer_check')),
+	          );
+	       
+	          $form['rate_the_room']['ouser_node_id'] = array(
+	            '#title' => t("<h3>$user_name Wishes<span>*</span></h3>"),
+	            '#type' => 'checkboxes',
+	            '#options' => $toppings1,
+	            '#required' => true,
+	            '#default_value' => array($nodeid),
+	            '#attributes' => array('class' => array('trade_offer_check')),
+	          );
+	      
+	        
+               }
+	    else{
+			$form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	           
+	              What would you like in return as a trade?
+	           </h2>',
+	        );
+			$form['rate_the_room']['cuser_node_id'] = array(
+				  '#title' => t('<h3>My Offers<span>*</span></h3>'),
+				  '#type' => 'checkboxes',
+				  '#options' => $toppings,
+				  '#required' => true,
+				  '#attributes' => array('class' => array('trade_offer_check')),
+				  );
+		        $form['rate_the_room']['ouser_node_offers_id'] = array(
+				    '#title' => t("<h3>$user_name Offers<span>*</span></h3>"),
+				    '#type' => 'checkboxes',
+				    '#options' => $current_node_user_offer,
+				    '#required' => true,
+				    '#attributes' => array('class' => array('trade_offer_check')),
+				  );
+			 $form['rate_the_room']['back'] = array(
+			    '#type' => 'submit',
+			    '#value' => t('Back')
+			  );
+                //  $form['rate_the_second']['#theme'][] = 'trade_form_form';
+			     }
+	      }
+	      else{
+				        
+	      $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	                What do you have to offer as a trade?  Try to pick something they are wishing for. Or you can send them an invitation to choose for themselves?
+	           </h2>',
+	        );
+	       
+	          $form['rate_the_room']['cuser_node_id'] = array(
+	          '#title' => t('<h3>My Offers<span>*</span></h3>'),
+	          '#type' => 'checkboxes',
+	          '#options' => $toppings,
+	          '#required' => true,
+	          '#attributes' => array('class' => array('trade_offer_check')),
+	          );
+	       
+		     $current_node_user_wish=trade_form_current_node_user_wish($nodeid,$deal_agreement);
+	         
+			  
+			  /*$form['rate_the_room']['ouser_node_id'] = array(
+	            '#title' => t("<h3>$user_name Wishes<span>*</span></h3>"),
+	            '#type' => 'radio',
+	            '#options' => array('1'=>'sdf','2'=>'sdfsadf'),
+	            '#required' => true,
+	            '#attributes' => array('class' => array('trade_offer_check')),
+	          );*/
+			
+			 
+			 $form['rate_the_room']['ouser_node_id'] = array(
+				'#type' => 'radios',
+				'#title' => t("<h3>$user_name Wishes<span>*</span></h3>"),
+				'#options' => $current_node_user_wish,
+				'#required' => true,
+				
+				'#attributes' => array('class' => array('trade_offer_check'))
+				);
+	         $form['rate_the_room']['ouser_node_offers_id'] = array(
+	            '#title' => t("<h3>$user_name Offers<span>*</span></h3>"),
+	            '#type' => 'checkboxes',
+	            '#options' => $current_node_user_offer,
+	            '#required' => true,
+				'#default_value' => array($nodeid),
+	            '#attributes' => array('class' => array('trade_offer_check')),
+	          );
+	    }
+	    }
+	    $form['rate_the_room']['#theme'][] = 'trade_form_form';
+	    
+	     if(($wish_node->field_type['und'][0] ['value']=='offer')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Free' || $wish_node->field_deal_agreement['und'][0]['value']=='Share: Borrow/ Lend'))
+	    {
+	       $form['rate_the_room']['message'] = array(
+	           '#title' => t("<h3>Message</h3>"),
+	       '#type' => 'textarea',
+	       '#attributes' => array('id' => array('proposal_message')),);
+	        $form['rate_the_room']['next'] = array(
+	            '#type' => 'submit',
+	            '#value' => t('Send Proposal'),
+	            '#weight' => 10,
+	            '#validate' => array('trade_form_form_validate'),
+	              '#attributes'=>array('class' => array('button_right', 'button', 'radius')),
+	            '#submit' => array('trade_form_submit_result'),
+	        );
+	     
+	    }
+	    else{
+	     
+	       $form['rate_the_room']['next'] = array(
+	        '#type' => 'submit',
+	        '#value' => t('Next'),
+	        '#weight' => 10,
+	        '#validate' => array('trade_form_form_validate'),
+	          '#attributes'=>array('class' => array('button_right', 'button', 'radius')),
+	        //'#submit' => array('trade_form_form_submit'),
+	    );
+	 
+	    }
+	
+	    
+	   if(empty($toppings)){
+	    $datas=$wish_node->field_type['und'][0] ['value'];
+	     drupal_set_message(t('No Any results found similar to current %function please create wish or offer', array('%function' => $datas)), 'error');
+	              
+	        
+	
+	  }
+	  }
+	
+	
+	    return $form;
+	    
+	}
+	
+	
+	
+	function trade_form_form_validate($form, &$form_state) {
+	    
+	  //  if (!is_numeric($form_state['values']['age']))
+	      //  form_set_error('age', t('That doesn\'t look like a valid age to me!'));
+	
+	}
+	
+	function trade_form_form_submit($form, &$form_state) {
+	  global $user;
+	
+	
+	 switch ($form_state['stage']) {
+	    
+	    case 'rate_the_service':
+	       $form_state['multistep_values'][$form_state['stage']] = $form_state['values'];
+	      if ($form_state['triggering_element']['#value'] != 'Back') {
+	 	
+			 
+			  $nodeid = $_GET['proposalsend'];
+			  $wish_node  = node_load( $nodeid);
+			  if(($wish_node->field_type['und'][0] ['value']=='offer')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Trade'))
+			  {
+					$ouser_node_id=$form_state['multistep_values']['rate_the_room']['ouser_node_id'];
+			  }
+			  else{
+				  $ouser_node_id=current($form_state['multistep_values']['rate_the_room']['ouser_node_id']);
+			  }
+	          if(empty($form_state['values']['author_id']))
+	          {
+	            $user_id=$user->uid;
+	          }else{
+	           $user_id=$form_state['values']['author_id'];
+	           }
+	          
+	            if (arg(0) == 'node' && is_numeric(arg(1)))
+	            {
+	               $nodeid = arg(1);
+	               $node  = node_load( $nodeid);
+	               $title = $node->title;
+	        
+	            }
+	                  if (trade_form_check_user_send($nodeid, $user_id)) {
+	                       
+	                       $mids=trade_form_mid($nodeid, $user_id,'ASC');
+						 
+	                       trade_form_edit_result($form,$form_state,$ouser_node_id,$mids);
+	                  }
+	      
+	                  else{
+	                    
+	                    trade_form_submit_result($form_state,$ouser_node_id);
+	                  }
+	        
+	            return true;
+	       }
+	             break;
+	 
+	    default:
+	      $form_state['multistep_values'][$form_state['stage']] = $form_state['values'];
+	      $form_state['new_stage'] = trade_form_move_to_next_stage($form, $form_state);
+	     break;
+	 
+	  } 
+	
+	 if (isset($form_state['complete'])) drupal_goto('complete-page');   
+	  
+	 if ($form_state['triggering_element']['#value'] == 'Back') {
+	    $form_state['new_stage'] = trade_form_move_to_previous_stage($form, $form_state);
+	  } 
+	  
+	 if (isset($form_state['multistep_values']['form_build_id'])) {
+	    $form_state['values']['form_build_id'] = $form_state['multistep_values']['form_build_id'];
+	  }
+	  $form_state['multistep_values']['form_build_id'] = $form_state['values']['form_build_id'];
+	  $form_state['stage'] = $form_state['new_stage'];
+	  $form_state['rebuild'] = TRUE;
+	  
+	 /* */
+	   
+	}
+	/*
+	 *  Implement hook trade_form_submit_result  
+	 */
+	function trade_form_submit_result($form_state,$ouser_node_id='')
+	{
+	
+	
+	  global $user;
+	  $array=array();
+	  $array1=array();
+	  $message_l='';
+	  $tradse_message='';
+	  $dates='';
+	  $location='';
+	  $p_message='';
+	  $nodeid = @$_GET['proposalsend'];
+	  
+	
+	if(isset($form_state['multistep_values']['rate_the_second']))
+	{
+	 $ouser_node_id=current($form_state['multistep_values']['rate_the_room']['ouser_node_id']);
+		       $recipient=node_load($ouser_node_id);
+	}
+	else{
+	 if(!empty($ouser_node_id['values']['ouser_node_id']))
+		  {
+		   
+		       $ouser_node_id=current($ouser_node_id['values']['ouser_node_id']);
+		       $recipient=node_load($ouser_node_id);
+		  
+		  }
+		  else{
+		    
+		   $recipient=node_load($ouser_node_id);
+		  }
+
+	}
+	  if(isset($form_state['values']['message'])){
+		$p_message=$form_state['values']['message'];
+	     $tradse_message=$form_state['values']['message'];
+	  }
+	  if(isset($form_state['values']['cuser_node_id'])){
+	   foreach($form_state['values']['cuser_node_id'] as $keys=>$values)
+	    {
+	      if($values!='')
+	      {
+	        $node=node_load($values);
+	        $array[$node->nid]= $node->title;
+	       
+	       }
+	    }
+	  }
+	 
+	 
+	
+	 
+	 if(isset($form_state['values']['ouser_node_offers_id'])){
+	    foreach($form_state['values']['ouser_node_offers_id'] as $key=>$valuess)
+	    {
+	      if($valuess!='')
+	      {
+	        $node=node_load($valuess);
+	        $array1[$node->nid]= $node->title;
+	       
+	       }
+	    }
+	 }
+	
+	   
+	     
+	
+	   
+	     $message= ucfirst($user->name).' offer to you '.implode(",",$array) .' he want to you '. implode(",",$array1) .' on your '. ucfirst($recipient->title).' wish. ';
+	     if(!empty($form_state['values']['location']))
+	     {
+		  $location=$form_state['values']['location'];
+	     $message.=' Meetup location and date : '.$form_state['values']['location'];
+	     }
+	     if(!empty($form_state['values']['date']))
+	     {
+		 $dates=$form_state['values']['date'];
+	     $message.=' , '. $form_state['values']['date'];
+	     }
+	     $subject='Trade proposal for '. ucfirst($recipient->title) ;
+	     
+	     privatemsg_new_thread(array(user_load($recipient->uid)),'Trade Proposal', $tradse_message);
+	    // 1) Save the message body first.
+	    $args = array();
+	    $args['subject'] = 'Proposal';
+	    $args['author'] = $user->uid;
+	    $args['body'] = $message;
+	    $args['timestamp'] = REQUEST_TIME;
+	    $mid = db_insert('trade_message')
+	      ->fields($args)
+	      ->execute();
+	    // 2) Save message to recipients.
+	    // Each recipient gets a record in the trade_index table.
+	   
+	    $query = db_insert('trade_index')->fields(array('mid', 'thread_id', 'recipient', 'type', 'is_new', 'deleted','last_update'));  
+	    $query->values(array(
+	        'mid' => $mid,
+	        'thread_id' => $mid,
+	        'recipient' => $recipient->uid,
+	        'type' => "USER",
+	        'is_new' => 1,
+	        'deleted' => 0,
+	        'last_update' => REQUEST_TIME,
+	  
+	      ));
+	   
+	    // We only want to add the author to the trade_index table, if the message has
+	    // not been sent directly to him.
+	    
+	      $query->values(array(
+	        'mid' => $mid,
+	        'thread_id' => $mid,
+	        'recipient' => $user->uid,
+	        'type' => 'USER',
+	        'is_new' => 0,
+	        'deleted' => 0,
+	        'last_update' => REQUEST_TIME,
+	  
+	      ));
+	    
+	   $query->execute();
+	   
+	    // We only want to add the offer node for wish to the trade_relations table, if the message has
+	    // not been sent directly to him.
+	  
+	  
+	  if(empty($array) && empty($array1))
+	  {
+	     $querys = db_insert('trade_relations')->fields(array('author', 'mid',  'ouser_node_id','proposal_id','p_dates_time','p_location','p_message','type'));
+	       
+	         $querys->values(array(
+	          'author' => $user->uid,
+	          'mid' => $mid,
+	          'ouser_node_id' => $ouser_node_id,
+			  'proposal_id' =>$nodeid,
+			  'p_dates_time' =>$dates,
+			  'p_location' =>$location,
+			  'p_message' =>$p_message,
+			  'type' => 'node_offers'
+	  
+	  
+	          ));
+	      }
+	    
+	  else{
+	  $querys = db_insert('trade_relations')->fields(array('author', 'mid',  'cuser_node_id',  'ouser_node_id','proposal_id','p_dates_time','p_location','p_message','type'));
+	    
+	    foreach($array as $key=>$val)
+	    {
+	         $querys->values(array(
+	          'author' => $user->uid,
+	          'mid' => $mid,
+	          'cuser_node_id' => $key,
+	          'ouser_node_id' => $ouser_node_id,
+			  'proposal_id' =>$nodeid,
+			  'p_dates_time' =>$dates,
+			  'p_location' =>$location,
+			  'p_message' =>$p_message, 
+	          'type' => 'user_offers'
+	  
+	  
+	          ));
+	    }
+	   
+	    foreach($array1 as $key=>$val)
+	    {
+	         $querys->values(array(
+	          'author' => $user->uid,
+	          'mid' => $mid,
+	          'cuser_node_id' => $key,
+	          'ouser_node_id' => $ouser_node_id,
+			   'proposal_id' =>$nodeid,
+			  'p_dates_time' =>$dates,
+			  'p_location' =>$location,
+			  'p_message' =>$p_message, 
+			  'type' => 'node_offers'
+	  
+	  
+	          ));
+	    }
+	  }
+	    $querys->execute();
+	    
+	   drupal_set_message("Your proposal has been sent succesfully..");
+	
+	  //drupal_goto("user/$recipient->uid");
+	  drupal_goto("listings");
+	   return true;
+	}
+	
+	/*
+	 *  Implement hook trade_form_submit_result  
+	 */
+	function trade_form_edit_result($from,$form_state,$ouser_node_id='',$mids='')
+	{
+	  global $user;
+	  $array=array();
+	  $array1=array();
+	  $tradse_message='';
+	  $dates='';
+	  $location='';
+	  $p_message='';
+	  $mids;
+	  $nodeid=$_GET['proposalsend'];
+	 
+      $mids=trade_form_mid($nodeid,$user->uid,'ASC');
+	   $nodeid = @$_GET['proposalsend'];
+	  if(isset($form_state['values']['message'])){
+	   $tradse_message=$form_state['values']['message'];
+	   $p_message=$tradse_message;
+	  }
+	 
+	 
+	  $recipient=node_load($nodeid);
+	   
+	   trade_form_delete_rel_mid($nodeid, $mids);
+	   
+	   if(isset($form_state['values']['cuser_node_id'])){
+	   foreach($form_state['values']['cuser_node_id'] as $keys=>$values)
+	    {
+	      if($values!='')
+	      {
+	        $node=node_load($values);
+	        $array[$node->nid]= $node->title;
+	       
+	       }
+	    }
+	   }
+	   if(isset($form_state['values']['ouser_node_offers_id'])){
+	    foreach($form_state['values']['ouser_node_offers_id'] as $key=>$valuess)
+	    {
+	      if($valuess!='')
+	      {
+	        $node=node_load($valuess);
+	        $array1[$node->nid]= $node->title;
+	       
+	       }
+	    }
+	   }
+	  
+	
+	    
+	    $message= $user->name.' offer to you '.implode(",",$array) .' he want to you '. implode(",",$array1) .' on your '. $recipient->title.' wish ';
+	    if(!empty($form_state['values']['location']))
+	     {
+		 $location=$form_state['values']['location'];
+	     $message.=' Meetup location and date : '.$form_state['values']['location'];
+	     }
+	     if(!empty($form_state['values']['date']))
+	     {
+		 $dates=$form_state['values']['date'];
+	     $message.=' , '. $form_state['values']['date'];
+	     }
+	     $subject='Trade proposal for '. ucfirst($recipient->title) ;
+	    
+	       privatemsg_new_thread(array(user_load($recipient->uid)),'Trade Proposal', $tradse_message);
+	 
+	    // 1) Save the message body first.
+	    $args = array();
+	    $args['subject'] = 'Proposal';
+	    $args['author'] = $user->uid;
+	    $args['body'] = $message;
+	    $args['timestamp'] = REQUEST_TIME;
+	    $mid = db_insert('trade_message')
+	      ->fields($args)
+	      ->execute();
+	    // 2) Save message to recipients.
+	    // Each recipient gets a record in the trade_index table.
+	   
+	    $query = db_insert('trade_index')->fields(array('mid', 'thread_id', 'recipient', 'type', 'is_new', 'deleted','last_update'));  
+	    $query->values(array(
+	        'mid' => $mid,
+	        'thread_id' => $mids,
+	        'recipient' => $recipient->uid,
+	        'type' => "USER",
+	        'is_new' => 1,
+	        'deleted' => 0,
+	        'last_update' => REQUEST_TIME,
+	  
+	      ));
+	   
+	    // We only want to add the author to the trade_index table, if the message has
+	    // not been sent directly to him.
+	    
+	      $query->values(array(
+	        'mid' => $mid,
+	        'thread_id' => $mids,
+	        'recipient' => $user->uid,
+	        'type' => 'USER',
+	        'is_new' => 0,
+	        'deleted' => 0,
+	        'last_update' => REQUEST_TIME,
+	  
+	      ));
+	    
+	   $query->execute();
+	   
+	    // We only want to add the offer node for wish to the trade_relations table, if the message has
+	    // not been sent directly to him.
+	    
+	    if(empty($array) && empty($array1))
+	  {
+	     $querys = db_insert('trade_relations')->fields(array('author', 'mid', 'ouser_node_id','proposal_id','p_dates_time','p_location','p_message','type'));
+	       
+	         $querys->values(array(
+	          'author' => $user->uid,
+	          'mid' => $mids,
+			  'ouser_node_id' => $nodeid,
+			  'proposal_id' =>$nodeid,
+			  'p_dates_time' =>$dates,
+			  'p_location' =>$location,
+			  'p_message' =>$p_message, 
+	          'type' => 'node_offers'
+	  
+	  
+	          ));
+	      }
+	    
+	  else{ 
+	    $querys = db_insert('trade_relations')->fields(array('author', 'mid', 'cuser_node_id',  'ouser_node_id','proposal_id','p_dates_time','p_location','p_message','type'));  
+	    foreach($array as $key=>$val)
+	    {
+	         $querys->values(array(
+	          'author' => $user->uid,
+	          'mid' => $mids,
+	          'cuser_node_id' => $key,
+	          'ouser_node_id' => $ouser_node_id,
+			   'proposal_id' =>$nodeid,
+			  'p_dates_time' =>$dates,
+			  'p_location' =>$location,
+			  'p_message' =>$p_message, 
+	         'type' => 'user_offers'
+	  
+	  
+	          ));
+	    }
+	   
+	    foreach($array1 as $key=>$val)
+	    {
+	         $querys->values(array(
+	          'author' => $user->uid,
+	          'mid' => $mids,
+	          'cuser_node_id' => $key,
+	          'ouser_node_id' => $ouser_node_id,
+			   'proposal_id' =>$nodeid,
+			  'p_dates_time' =>$dates,
+			  'p_location' =>$location,
+			  'p_message' =>$p_message, 
+	           'type' => 'node_offers'
+	  
+	  
+	          ));
+	    }
+	  }
+	    $querys->execute();
+	    
+	   drupal_set_message("Your proposal has been modify succesfully..");
+	   //drupal_goto("user/$recipient->uid");
+	   drupal_goto("listings");
+	   return true;
+	}
+	/**
+	 * Form builder for edit trade_form page.
+	 */
+	function trade_form_edit_proposal($nid,$author_uid='') {
+	  global $user;
+	  $nid=@$_GET['proposalsend'];
+	    
+	  if($author_uid=='')
+	  {
+	    $user_uid=$user->uid;
+	  }
+	 else{
+	     $user_uid=$author_uid;
+	}
+	  $form = array();
+	
+	 $wish_node=(node_load($nid));
+	
+	     $deal_agreement= $wish_node->field_deal_agreement['und'][0] ['value']."," ;
+	   $deal_agreement .= "Free";
+	 
+	   $toppings =trade_form_my_offer($user_uid,$wish_node->field_type['und'][0] ['value'],$deal_agreement);
+	
+	   
+	   $toppings1=trade_form_current_node($nid);
+	   $user_name=trade_form_current_node_user_name($nid);
+	   $current_node_user_offer=trade_form_current_node_user_offer($nid,$deal_agreement);
+	   
+	   $node = node_load($nid);
+	   $title = $node->title;
+	   $mid=trade_form_mid($nid, $user_uid);
+	   
+	   $trade_relations=trade_form_trade_relations_value($nid, $user_uid,$mid);
+	   
+	    $indexes=array();
+	    foreach($trade_relations as $key=>$value):
+	        $indexes[$value->cuser_node_id] = $value->cuser_node_id;
+	    endforeach;
+	  
+	  # the drupal checkboxes form field definition
+	   $form['rate_the_room']['author_id'] = array(
+	             '#type' => 'value',
+	             '#value' => $user_uid,
+	           );
+	  $cuser_name=ucfirst(user_load($user_uid)->name);
+	    $form['rate_the_room']['cuser_node_id'] = array(
+	      '#title' => t("$cuser_name Offers"),
+	      '#type' => 'checkboxes',
+	      '#options' => $toppings,
+	      '#required' => true,
+	      '#default_value' => $indexes,
+	      '#attributes' => array('class' => array('trade_offer_check')),
+	    );
+	    
+	    $form['rate_the_room']['ouser_node_id'] = array(
+	      '#title' => t("$user_name Wishes"),
+	      '#type' => 'checkboxes',
+	      '#options' => $toppings1,
+	      '#required' => true,
+	      '#default_value' => array($nid),
+	      '#attributes' => array('class' => array('trade_offer_check')),
+	    );
+	    $form['rate_the_room']['ouser_node_offers_id'] = array(
+	      '#title' => t("$user_name Offers"),
+	      '#type' => 'checkboxes',
+	      '#required' => true,
+	      '#options' => $current_node_user_offer,
+	      '#default_value' => $indexes,
+	      '#attributes' => array('class' => array('trade_offer_check')),
+	    );
+	    
+	    $form['rate_the_room']['submit'] = array(
+	        '#type' => 'submit',
+	        '#value' => t('Submit'),
+	        '#weight' => 10,
+	        '#validate' => array('trade_form_form_validate'),
+	       // '#submit' => array('trade_form_form_submit'),
+	    );
+	
+	    $form['rate_the_room']['#theme'][] = 'trade_form_form';
+	
+	    $form['rate_the_room']['submit'] = array(
+	           '#type' => 'submit',
+	           '#value' => t('Modify Praposal'),
+	           '#weight' => 10,
+	           '#attributes'=>array('class' => array('button_right', 'button', 'radius')),
+	           '#validate' => array('trade_form_form_validate'),
+	
+	       );
+	
+	
+	
+	    $form['#theme'][] = 'trade_form_form';
+	
+	
+	  return $form;
+	}
+	
+	
+	/*
+	 * Implements hook_theme
+	 */
+	function trade_form_theme() {
+	    
+	    return array(
+	        'trade_form_form' => array(
+	            'arguments' => array('form' => NULL),
+	            'render element' => 'form',
+	            'template' => 'trade_form_form',
+	        ),
+	        'mark_complete_form' => array(
+	            'arguments' => array('form' => NULL),
+	            'render element' => 'form',
+	            'template' => 'mark_complete_form',
+	        ),
+	      
+	    );
+	}
+	/*
+	 * Implements hook_my_offer
+	 * this hooks display the current user offer
+	*/
+	function trade_form_my_offer($author_uid='',$type='offer',$deal_agreement='Free'){
+	  global $user, $base_url;
+	 $myArr = array();
+	
+	   if($author_uid=='')
+	  {
+	    $user_uid=$user->uid;
+	  }
+	 else{
+	     $user_uid=$author_uid;
+	}
+	  
+	  
+	
+	
+	 $arr = explode(',', $deal_agreement);
+	    $agreement_value = array('Free');
+	      foreach ($arr as $key => $value) {
+	        if($value!='Free')
+	        {
+	            array_push($agreement_value,$value);
+	       }
+	     }
+	
+	
+	   $nirvanaQuery = db_select('node', 'n');
+	    $nirvanaQuery->join('field_data_field_type', 'o', 'n.nid = o.entity_id');
+	   // $nirvanaQuery->join('field_data_field_deal_agreement', 'a', 'n.nid = a.entity_id');
+	    
+	    $nirvanaQuery->condition('n.type', 'offer_wish')
+	        ->condition('n.status', '1', '=')
+	        ->condition('n.uid', $user_uid, '=')
+	        ->condition('o.field_type_value', 'offer', '=')
+	        //->condition('a.field_deal_agreement_value', $agreement_value , 'IN')
+	        ->fields('n', array('nid'))
+	        ->fields('n', array('title'));
+	    $nirvanaQuery->orderBy('n.nid', 'DESC');
+	    $result = $nirvanaQuery->execute();
+	    
+	   
+	    foreach ($result as $nodeInfo) {
+	      $nid   = $nodeInfo->nid;
+	      $node=node_load($nid);
+	       $title = '<a class="colorbox-node" href="'.$base_url.'/offered-items-link/'.$nid.'" data-href="'.$base_url.'/offered-items-link/'.$nid.'?width=800&height=600" > '.$node->title.'</a>';
+	      $myArr[$nid] =  $title;
+	    }
+	    return $myArr;
+	}
+	
+	
+	/*
+	 * Implements hook_current_node_user_offer
+	 * this hooks display the current node user offer
+	*/
+	function trade_form_current_node_user_offer($nodeid='',$deal_agreement='Free'){
+	  global $user, $base_url;
+	 $myArr = array();
+	 if (arg(0) == 'node' && is_numeric(arg(1)))
+	  {
+	     $nodeid = arg(1);
+	    
+	     $node  = node_load($nodeid);
+	     $uid = $node->uid;
+	     
+	  }
+	 else{
+	 $node  = node_load($nodeid);
+	     $uid = $node->uid;
+	  }
+	
+	    $arr = explode(',', $deal_agreement);
+	    $agreement_value = array('Free');
+	      foreach ($arr as $key => $value) {
+	        if($value!='Free')
+	        {
+	            array_push($agreement_value,$value);
+	       }
+	     }
+	 
+	
+	   $nirvanaQuery = db_select('node', 'n');
+	    $nirvanaQuery->join('field_data_field_type', 'o', 'n.nid = o.entity_id');
+	     $nirvanaQuery->join('field_data_field_deal_agreement', 'a', 'n.nid = a.entity_id');
+	    $nirvanaQuery->condition('n.type', 'offer_wish')
+	        ->condition('n.status', '1', '=')
+	        ->condition('n.uid', $uid, '=')
+	        ->condition('o.field_type_value', 'offer', '=')
+	         ->condition('a.field_deal_agreement_value', $agreement_value , 'IN')
+	        ->fields('n', array('nid'))
+	        ->fields('n', array('title'));
+	    $nirvanaQuery->orderBy('n.nid', 'DESC');
+	    $result = $nirvanaQuery->execute();
+	    $myArr = array();
+	    foreach ($result as $nodeInfo) {
+	      $nid   = $nodeInfo->nid;
+ 	      $node_title   = $nodeInfo->title;
+	     $title = '<a class="colorbox-node" href="'.$base_url.'/offered-items-link/'.$nid.'" data-href="'.$base_url.'/offered-items-link/'.$nid.'?width=800&height=600" > '.$node_title.'</a>';
+	      $myArr[$nid] =  $title;
+	    }
+	  return $myArr;
+	}
+	
+	
+	/*
+	 * Implements hook_current_node_user_wish
+	 * this hooks display the current node user wish
+	*/
+	function trade_form_current_node_user_wish($nodeid='',$deal_agreement='Free'){
+	  global $user, $base_url;
+	 $myArr = array();
+	 if (arg(0) == 'node' && is_numeric(arg(1)))
+	  {
+	     $nodeid = arg(1);
+	    
+	     $node  = node_load($nodeid);
+	     $uid = $node->uid;
+	     
+	  }
+	 else{
+	 $node  = node_load($nodeid);
+	     $uid = $node->uid;
+	  }
+	
+	    $arr = explode(',', $deal_agreement);
+	    $agreement_value = array('Free');
+	      foreach ($arr as $key => $value) {
+	        if($value!='Free')
+	        {
+	            array_push($agreement_value,$value);
+	       }
+	     }
+	 
+	
+	   $nirvanaQuery = db_select('node', 'n');
+	    $nirvanaQuery->join('field_data_field_type', 'o', 'n.nid = o.entity_id');
+	     $nirvanaQuery->join('field_data_field_deal_agreement', 'a', 'n.nid = a.entity_id');
+	    $nirvanaQuery->condition('n.type', 'offer_wish')
+	        ->condition('n.status', '1', '=')
+	        ->condition('n.uid', $uid, '=')
+	        ->condition('o.field_type_value', 'wish', '=')
+	         ->condition('a.field_deal_agreement_value', $agreement_value , 'IN')
+	        ->fields('n', array('nid'))
+	        ->fields('n', array('title'));
+	    $nirvanaQuery->orderBy('n.nid', 'DESC');
+	    $result = $nirvanaQuery->execute();
+	    $myArr = array();
+	    foreach ($result as $nodeInfo) {
+	      $nid   = $nodeInfo->nid;
+ 	      $node_title   = $nodeInfo->title;
+	     $title = '<a class="colorbox-node" href="'.$base_url.'/offered-items-link/'.$nid.'" data-href="'.$base_url.'/offered-items-link/'.$nid.'?width=800&height=600" > '.$node_title.'</a>';
+	      $myArr[$nid] =  $title;
+	    }
+	  return $myArr;
+	}
+	
+	
+	
+	/*
+	 * Implements hook__current_node
+	 * this hooks display the current user offer
+	*/
+	function trade_form_current_node($nodeid='')
+	{
+global $base_url;
+	   $myArr = array();
+	  if (arg(0) == 'node' && is_numeric(arg(1)))
+	  {
+	     $nodeid = arg(1);
+	    
+	     $node  = node_load( $nodeid);
+	     $title = '<a class="colorbox-node" href="'.$base_url.'/offered-items-link/'.$nodeid.'" data-href="'.$base_url.'/offered-items-link/'.$nodeid.'?width=800&height=600" > '.$node->title.'</a>';
+	     $nid   = $node->nid;
+	     $myArr[$nid] =  $title;
+	  }
+	  else{
+	     $node  = node_load( $nodeid);
+	     $title = '<a class="colorbox-node" href="'.$base_url.'/offered-items-link/'.$nodeid.'" data-href="'.$base_url.'/offered-items-link/'.$nodeid.'?width=800&height=600" > '.$node->title.'</a>';
+	     $nid   = $node->nid;
+	     $myArr[$nid] =  $title;
+	}
+	  return $myArr;
+	}
+	
+	/*
+	 * Implements hook_current_node_user_name
+	 * this hooks display the user name based on current node
+	*/
+	function trade_form_current_node_user_name($nodeid)
+	{
+	  if (arg(0) == 'node' && is_numeric(arg(1)))
+	  {
+	     $nodeid = arg(1);
+	     $node  = node_load( $nodeid);
+	     $users=user_load($node->uid);
+	     $username=$users->name;
+	  }
+	  else{
+	     $node  = node_load( $nodeid);
+	     $users=user_load($node->uid);
+	     $username=$users->name;
+	}
+	  return $username;
+	}
+	
+	/**
+	 * Helper function returns TRUE or FALSE based on whether the current user
+	 * has trade proposal the node being displayed. 
+	 * multiple trade proposal from a single user then we return FALSE immediately.
+	 */
+	function trade_form_check_user_send($nid, $uid) {
+	 
+	  $results = db_select('trade_relations', 'r')
+	    ->fields('r')
+	    ->condition('author', $uid, '=')
+	    ->condition('proposal_id', $nid, '=')
+	    ->execute()
+	    ->fetchAll();
+	  if (count($results) == 0) {
+	    return FALSE;
+	  }
+	  else {
+	    return TRUE;
+	  }
+	}
+	
+	
+	function get_city_by_node($nodes)
+	{
+	    $address='';
+	
+	      foreach (field_info_fields() as $field_name => $field) {
+	  if ($field['type'] == 'field_collection' && isset($nodes->$field_name)) {
+	
+	    foreach ($nodes->$field_name as $language => $values) {
+	      $field_collection2 = entity_load('field_collection_item', array($values[0]['value']));
+	
+	        foreach($field_collection2 as $keys=>$field_collection3){
+	    if(!empty($field_collection3->field_meet_up_location)){
+	        if(!empty($field_collection3->field_meet_up_location[LANGUAGE_NONE][0]['administrative_area'])){
+	      $address=address_format($field_collection3->field_meet_up_location);
+	           }
+	       }
+	         }
+	      }
+	   }
+	  }
+	
+	  return $address;
+	}
+	
+	
+	
+	/**
+	 * Helper function returns all value based on current user and node
+	 */
+	function trade_form_trade_relations_value($nid, $uid,$mid) {
+	 
+	  $results = db_select('trade_relations', 'r')
+	    ->fields('r')
+	    ->condition('author', $uid, '=')
+	    ->condition('proposal_id', $nid, '=')
+	    ->condition('mid', $mid, '=')
+	      
+	    ->execute()
+	    ->fetchAll();
+	  
+	 return $results;
+	  
+	}
+	function trade_form_trade_relations_wish_value($nid, $uid,$mid) {
+	 
+	  $results = db_select('trade_relations', 'r')
+	    ->fields('r')
+	    ->condition('author', $uid, '=')
+	    ->condition('proposal_id', $nid, '=')
+	    ->condition('mid', $mid, '=')
+	      
+	    ->execute()
+	    ->fetchAll();
+	  
+	 return $results;
+	  
+	}
+	
+	/**
+	 * Helper function returns all value based on current user and node
+	 */
+	function trade_form_mid($nid, $uid,$order='DESC') {
+	 
+	    $results = db_select('trade_relations', 'r')
+	      ->fields('r')
+	      ->condition('author', $uid, '=')
+	      ->condition('proposal_id', $nid, '=')
+	      ->orderBy('rel_id', $order)
+	      ->range(0, 1)
+	      ->execute()
+	      ->fetchAll();
+		  
+	    return $results['0']->mid;
+	  
+	}
+	/**
+	 * Helper function returns all value based on current wish
+	 */
+	function trade_form_wish_mid($nid, $uid,$order='DESC') {
+	 
+	    $results = db_select('trade_relations', 'r')
+	      ->fields('r')
+	      ->condition('author', $uid, '=')
+	      ->condition('proposal_id', $nid, '=')
+	      ->orderBy('rel_id', $order)
+	      ->range(0, 1)
+	      ->execute()
+	      ->fetchAll();
+	    return $results['0']->ouser_node_id;
+	  
+	}
+	/**
+	 * Helper function returns all value based on current porposal location
+	 */
+	function trade_form_proposal_location($nid, $uid,$order='DESC') {
+	 
+	    $results = db_select('trade_relations', 'r')
+	      ->fields('r')
+	      ->condition('author', $uid, '=')
+	      ->condition('proposal_id', $nid, '=')
+	      ->orderBy('rel_id', $order)
+	      ->range(0, 1)
+	      ->execute()
+	      ->fetchAll();
+	    return @$results['0']->p_location;
+	  
+	}
+	/**
+	 * Helper function returns all value based on current porposal message
+	 */
+	function trade_form_proposal_messages($nid, $uid,$order='DESC') {
+	 
+	    $results = db_select('trade_relations', 'r')
+	      ->fields('r')
+	      ->condition('author', $uid, '=')
+	      ->condition('proposal_id', $nid, '=')
+	      ->orderBy('rel_id', $order)
+	      ->range(0, 1)
+	      ->execute()
+	      ->fetchAll();
+	    return @$results['0']->p_message;
+	  
+	}
+	/**
+	 * Helper function returns all value based on current porposal date & time
+	 */
+	function trade_form_proposal_dates_time($nid, $uid,$order='DESC') {
+	 
+	    $results = db_select('trade_relations', 'r')
+	      ->fields('r')
+	      ->condition('author', $uid, '=')
+	      ->condition('proposal_id', $nid, '=')
+	      ->orderBy('rel_id', $order)
+	      ->range(0, 1)
+	      ->execute()
+	      ->fetchAll();
+	    return @$results['0']->p_dates_time;
+	  
+	}
+	
+	/**
+	 * Helper function returns all value based on current user and node
+	 */
+	function trade_form_delete_rel_mid($ouser_node_id, $mid) {
+	
+	   $results = db_delete('trade_relations')
+	    ->condition('mid', $mid,'=')
+	    ->condition('proposal_id', $ouser_node_id,'=')
+	    ->execute();
+	   
+	    return $results;
+	  
+	}
+	
+	/**
+	 * Helper function returns all value based on current user and node
+	 */
+	function trade_form_load_rel_mid($ouser_node_id, $mid) {
+	
+	
+	 $results = db_select('trade_relations', 'r')
+	    ->fields('r')
+	    ->condition('proposal_id', $ouser_node_id, '=')
+	    ->condition('mid', $mid, '=')
+	    ->execute()
+	    ->fetchAll();
+	
+	    return $results;
+	  
+	}
+	
+	function trade_form_user_access($permission = 'read trade_form', $account = NULL) {
+	  
+	  if ( $account === NULL ) {
+	    global $user;
+	    $account = $user;
+	  }
+	  if (!$account->uid) { // Disallow anonymous access, regardless of permissions
+	    return FALSE;
+	  }
+	  
+	  if (!user_access($permission, $account)) {
+	    return FALSE;
+	  }
+	  return TRUE;
+	}
+	
+	/**
+	 * Check access to the view messages page.
+	 *
+	 * Function to restrict the access of the view messages page to just the
+	 * messages/view/% pages and not to leave tabs artifact on other lower
+	 * level pages such as the messages/new/%.
+	 *
+	 * @param $thread
+	 *   A array containing all information about a specific thread, generated by
+	 *   trade_form_thread_load().
+	 *
+	 * @ingroup api
+	 */
+	function trade_form_view_access($thread) {
+	
+	 
+	 
+	  // Do not allow access to threads without messages.
+	  if (empty($thread['messages'])) {
+	    // Count all messages, if there
+	    
+	    return FALSE;
+	  }
+	  if (trade_form_user_access('user access trade form') && arg(1) == 'view') {
+	    return TRUE;
+	  }
+	  return FALSE;
+	}
+	
+	/**
+	 * Load a thread with all the messages and participants.
+	 *
+	 * This function is called by the menu system through the %privatemsg_thread
+	 * wildcard.
+	 *
+	 * @param $thread_id
+	 *   Thread id, pmi.thread_id or pm.mid of the first message in that thread.
+	 * @param $account
+	 *   User object for which the thread should be loaded, defaults to
+	 *   the current user.
+	 * @param $start
+	 *   Message offset from the start of the thread.
+	 * @param $useAccessDenied
+	 *   Set to TRUE if the function should forward to the access denied page
+	 *   instead of not found. This is used by the menu system because that does
+	 *   load arguments before access checks are made. Defaults to FALSE.
+	 *
+	 * @return
+	 *   $thread object, with keys messages, participants, title and user. messages
+	 *   contains an array of messages, participants an array of user, subject the
+	 *   subject of the thread and user the user viewing the thread.
+	 *
+	 *   If no messages are found, or the thread_id is invalid, the function returns
+	 *   FALSE.
+	
+	 * @ingroup api
+	 */
+	function trade_form_thread_load($thread_id, $account = NULL, $start = NULL, $useAccessDenied = FALSE) {
+	
+	  $threads = &drupal_static(__FUNCTION__, array());
+	  $thread_id = (int)$thread_id;
+	  if ($thread_id > 0) {
+	    $thread = array('thread_id' => $thread_id);
+	
+	    
+	    if (is_null($account)) {
+	      global $user;
+	      $account = clone $user;
+	    }
+	
+	    if (!isset($threads[$account->uid])) {
+	      $threads[$account->uid] = array();
+	    }
+	
+	    if (!array_key_exists($thread_id, $threads[$account->uid])) {
+	     
+	      // Load the list of participants.
+	      $thread['participants'] = _trade_form_load_thread_participants($thread_id, $account, FALSE, 'view');
+	      $thread['read_all'] = FALSE;
+	       
+	      if (empty($thread['participants']) && trade_form_user_access('read all private messages', $account)) {
+	        $thread['read_all'] = TRUE;
+	        // Load all participants.
+	        $thread['participants'] = _trade_form_load_thread_participants($thread_id, FALSE, FALSE, 'view');
+	      }
+	    
+	      // Load messages returned by the messages query with privatemsg_message_load_multiple().
+	      $query = _trade_form_assemble_query('messages', array($thread_id), $thread['read_all'] ? NULL : $account);
+	
+	
+	// Use subquery to bypass group by since it is not possible to alter
+	      // existing GROUP BY statements.
+	      $countQuery = db_select($query);
+	      $countQuery->addExpression('COUNT(*)');
+	      $thread['message_count'] = $thread['to'] = $countQuery->execute()->fetchField();
+	      $thread['from'] = 1;
+	      
+	      // Check if we need to limit the messages.
+	      $max_amount = variable_get('privatemsg_view_max_amount', 20);
+	
+	      // If there is no start value, select based on get params.
+	      if (is_null($start)) {
+	        if (isset($_GET['start']) && $_GET['start'] < $thread['message_count']) {
+	          $start = $_GET['start'];
+	        }
+	        elseif (!variable_get('privatemsg_view_use_max_as_default', FALSE) && $max_amount == PRIVATEMSG_UNLIMITED) {
+	          $start = PRIVATEMSG_UNLIMITED;
+	        }
+	        else {
+	          $start = $thread['message_count'] - (variable_get('privatemsg_view_use_max_as_default', FALSE) ? variable_get('privatemsg_view_default_amount', 10) : $max_amount);
+	        }
+	      }
+	
+	      if ($start != PRIVATEMSG_UNLIMITED) {
+	        if ($max_amount == PRIVATEMSG_UNLIMITED) {
+	          $last_page = 0;
+	          $max_amount = $thread['message_count'];
+	        }
+	        else {
+	          // Calculate the number of messages on the "last" page to avoid
+	          // message overlap.
+	          // Note - the last page lists the earliest messages, not the latest.
+	          $paging_count = variable_get('privatemsg_view_use_max_as_default', FALSE) ? $thread['message_count'] - variable_get('privatemsg_view_default_amount', 10) : $thread['message_count'];
+	          $last_page = $paging_count % $max_amount;
+	        }
+	
+	        // Sanity check - we cannot start from a negative number.
+	        if ($start < 0) {
+	          $start = 0;
+	        }
+	        $thread['start'] = $start;
+	
+	        //If there are newer messages on the page, show pager link allowing to go to the newer messages.
+	        if (($start + $max_amount + 1) < $thread['message_count']) {
+	          $thread['to'] = $start + $max_amount;
+	          $thread['newer_start'] = $start + $max_amount;
+	        }
+	        if ($start - $max_amount >= 0) {
+	          $thread['older_start'] = $start - $max_amount;
+	        }
+	        elseif ($start > 0) {
+	          $thread['older_start'] = 0;
+	        }
+	
+	        // Do not show messages on the last page that would show on the page
+	        // before. This will only work when using the visual pager.
+	        if ($start < $last_page && $max_amount != PRIVATEMSG_UNLIMITED && $max_amount < $thread['message_count']) {
+	          unset($thread['older_start']);
+	          $thread['to'] = $thread['newer_start'] = $max_amount = $last_page;
+	          // Start from the first message - this is a specific hack to make sure
+	          // the message display has sane paging on the last page.
+	          $start = 0;
+	        }
+	        // Visual counts start from 1 instead of zero, so plus one.
+	        $thread['from'] = $start + 1;
+	        $query->range($start, $max_amount);
+	      }
+	      $conditions = array();
+	      if (!$thread['read_all']) {
+	        $conditions['account'] = $account;
+	      }
+	      $thread['messages'] = trade_form_message_load_multiple($query->execute()->fetchCol(), $conditions);
+	 
+	      // If there are no messages, don't allow access to the thread.
+	      if (empty($thread['messages'])) {
+	        if ($useAccessDenied) {
+	          // Generate new query with read all to see if the thread does exist.
+	          $query = _trade_form_assemble_query('messages', array($thread_id), NULL);
+	          $exists = $query->countQuery()->execute()->fetchField();
+	          if (!$exists) {
+	            // Thread does not exist, display 404.
+	            $thread = FALSE;
+	          }
+	        }
+	        else {
+	          $thread = FALSE;
+	        }
+	      }
+	      else {
+	        // General data, assume subject is the same for all messages of that thread.
+	        $thread['user'] = $account;
+	        $message = current($thread['messages']);
+	        $thread['subject'] = $thread['subject-original'] = $message->subject;
+	        if ($message->has_tokens) {
+	         // $thread['subject'] = privatemsg_token_replace($thread['subject'], array('privatemsg_message' => $message), array('sanitize' => TRUE, 'privatemsg-show-span' => FALSE));
+	        }
+	      }
+	      $threads[$account->uid][$thread_id] = $thread;
+	    }
+	    
+	    return $threads[$account->uid][$thread_id];
+	  }
+	  return FALSE;
+	}
+	
+	/**
+	 * Implements hook_privatemsg_view_template().
+	 *
+	 * Allows modules to define different message view template.
+	 *
+	 * This hook returns information about available themes for privatemsg viewing.
+	 *
+	 * array(
+	 *  'machine_template_name' => 'Human readable template name',
+	 *  'machine_template_name_2' => 'Human readable template name 2'
+	 * };
+	 */
+	function trade_form_view_template() {
+	  return array(
+	    'trade-form-view' => 'Default view',
+	  );
+	}
+	/**
+	 * Implements hook_entity_property_info().
+	 */
+	function trade_from_entity_property_info() {
+	  $info = array();
+	  // Add meta-data about the basic node properties.
+	  $properties = &$info['trade_from_message']['properties'];
+	  $properties = array(
+	    'mid' => array(
+	      'type'  => 'integer',
+	      'label' => t('Private message ID'),
+	      'description' => t('Private message ID'),
+	    ),
+	    'thread_id' => array(
+	      'type'  => 'integer',
+	      'label' => t('Private message thread ID'),
+	      'description' => t('Private message thread ID'),
+	      'getter callback' => 'entity_property_verbatim_get',
+	    ),
+	    'author' => array(
+	      'type'  => 'user',
+	      'label' => t('Private message author'),
+	      'description' => t('Private message author'),
+	      'setter callback' => 'entity_property_verbatim_set',
+	    ),
+	    'subject' => array(
+	      'type'  => 'text',
+	      'label' => t('Private message subject'),
+	      'description' => t('Private message subject'),
+	      'setter callback' => 'entity_property_verbatim_set',
+	    ),
+	    'body' => array(
+	      'type'  => 'text',
+	      'label' => t('Private message body'),
+	      'description' => t('Private message body'),
+	      'setter callback' => 'entity_property_verbatim_set',
+	    ),
+	    'timestamp' => array(
+	      'type' => 'date',
+	      'label' => t('Private message sent date'),
+	      'description' => t('Private message sent date'),
+	    ),
+	  );
+	  return $info;
+	}
+	function trade_form_message_load_multiple(array $pmids, array $conditions = array(), $reset = FALSE) {
+	
+	 
+	  $result = entity_load('trade_form_message', $pmids, $conditions, $reset);
+	
+	  return $result;
+	}
+	
+	/**
+	 * Implements hook_entity_info().
+	 */
+	function trade_form_entity_info() {
+	  return array(
+	    'trade_form_message' => array(
+	      'label' => t('Trade message'),
+	      'base table' => 'trade_message',
+	      'fieldable' => TRUE,
+	      'controller class' => 'Trade_FormMessageController',
+	     
+	      'entity keys' => array(
+	        'id' => 'mid',
+	      ),
+	      'bundles' => array(
+	        'trade_form_message' => array(
+	          'label' => t('Trade message'),
+	          
+	        ),
+	      ),
+	    ),
+	  );
+	}
+	
+	/**
+	 * Private message controller, loads private messages.
+	 */
+	class Trade_FormMessageController extends DrupalDefaultEntityController {
+	
+	  protected $account = NULL;
+	
+	  protected function attachLoad(&$messages, $revision_id = FALSE) {
+	    global $user;
+	   
+	    foreach ($messages as $message) {
+	      $message->user = $this->account ? $this->account : $user;
+	      // Load author of message.
+	      if (!($message->author = user_load($message->author))) {
+	        // If user does not exist, load anonymous user.
+	        $message->author = user_load(0);
+	      }
+	    }
+	    parent::attachLoad($messages, $revision_id);
+	  }
+	
+	  protected function buildQuery($ids, $conditions = array(), $revision_id = FALSE) {
+	    // Remove account from conditions.
+	    if (isset($conditions['account'])) {
+	      $this->account = $conditions['account'];
+	      unset($conditions['account']);
+	    }
+	
+	    $query = parent::buildQuery($ids, $conditions, $revision_id);
+	    $query->fields('pmi', array('is_new', 'thread_id'));
+	    if ($this->account) {
+	      $query
+	        ->condition('pmi.recipient', $this->account->uid)
+	        ->condition('pmi.type', array('hidden', 'user'));
+	    }
+	    else {
+	      // If no account is given, at least limit the result to a single row per
+	      // message.
+	      $query->distinct();
+	    }
+	    $query->join('trade_index', 'pmi', "base.mid = pmi.mid");
+	    return $query;
+	  }
+	}
+	function _trade_form_load_thread_participants($thread_id, $account, $ignore_hidden = TRUE, $access = 'write') {
+	  $query = _trade_form_assemble_query('participants', $thread_id, $account);
+	  $participants = array();
+	  $to_load = array();
+	  foreach ($query->execute() as $participant) {
+	    if ($ignore_hidden && $participant->type == 'hidden') {
+	      continue;
+	    }
+	    else {
+	      $to_load[$participant->type][] = $participant->recipient;
+	    }
+	  }
+	
+	  
+	  // Now, load all non-user recipients.
+	   // Now, load all non-user recipients.
+	  foreach ($to_load as $type => $ids) {
+	    
+	    $type_info = trade_form_recipient_get_type($type);
+	     
+	    
+	    if (isset($type_info['load']) && is_callable($type_info['load'])) {
+	      $loaded = $type_info['load']($ids);
+	      if (is_array($loaded)) {
+	        $participants += $loaded;
+	      }
+	    }
+	  }
+	
+	  return $participants;
+	}
+	
+	function trade_form_recipient_get_types() {
+	  $types = &drupal_static(__FUNCTION__, NULL);
+	
+	  if ($types === NULL) {
+	    $types = module_invoke_all('privatemsg_recipient_type_info');
+	
+	    if (!is_array($types)) {
+	      $types = array();
+	    }
+	    drupal_alter('privatemsg_recipient_type_info', $types);
+	    uasort($types, 'element_sort');
+	  }
+	 
+	  return $types;
+	}
+	function trade_form_recipient_get_type($type) {
+	  $types = trade_form_recipient_get_types();
+	    $type=strtolower($type);
+	 
+	    return $types[$type];
+	 
+	}
+	
+	
+	function _trade_form_assemble_query($query) {
+	
+	  
+	  // Modules will be allowed to choose the prefix for the query builder,
+	  // but if there is not one supplied, 'privatemsg' will be taken by default.
+	  if (is_array($query)) {
+	    $query_id = $query[0];
+	    $query_group = $query[1];
+	  }
+	  else {
+	    $query_id = $query;
+	    $query_group = 'trade_form';
+	  }
+	
+	  /**
+	   * Begin: dynamic arguments
+	   */
+	  $args = func_get_args();
+	
+	  unset($args[0]);
+	  // We do the merge because we call call_user_func_array and not drupal_alter.
+	  // This is necessary because otherwise we would not be able to use $args
+	  // correctly (otherwise it doesn't unfold).
+	  $query_function = $query_group . '_sql_' . $query_id;
+	  if (!function_exists($query_function)) {
+	    drupal_set_message(t('Query function %function does not exist', array('%function' => $query_function)), 'error');
+	    return FALSE;
+	  }
+	  $query = call_user_func_array($query_function, $args);
+	  // Add a tag to make it alterable.
+	  $query->addTag($query_group . '_' . $query_id);
+	
+	  // Add arguments as metadata.
+	  foreach ($args as $id => $arg) {
+	    $query->addMetaData('arg_' . $id, $arg);
+	  }
+	
+	  return $query;
+	}
+	
+	function trade_form_sql_messages ($threads, $account = NULL, $load_all = FALSE) {
+	  $query = db_select('trade_index', 'pmi');
+	  $query->addField('pmi', 'mid');
+	  $query->join('trade_message', 'pm', 'pm.mid = pmi.mid');
+	  if (!$load_all) {
+	    $query->condition('pmi.deleted', 0);
+	  }
+	  // If there are multiple inserts during the same second (tests, for example)
+	  // sort by mid second to have them in the same order as they were saved.
+	  $query
+	    ->condition('pmi.thread_id', $threads)
+	    ->groupBy('pm.timestamp')
+	    ->groupBy('pmi.mid')
+	    // Order by timestamp first.
+	    ->orderBy('pm.timestamp', 'ASC')
+	    // If there are multiple inserts during the same second (tests, for example)
+	    // sort by mid second to have them in the same order as they were saved.
+	    ->orderBy('pmi.mid', 'ASC');
+	  if ($account) {
+	    $query
+	      ->condition('pmi.recipient', $account->uid)
+	      ->condition('pmi.type', array('hidden', 'user'));
+	  }
+	  return $query;
+	}
+	
+	
+	function trade_form_query_trade_form_messages_alter($query) {
+	 
+	  $thread_id = $query->getMetaData('arg_1');
+	  
+	  $account = $query->getMetaData('arg_2');
+	   
+	}
+	
+	/**
+	 * Load all participants of a thread.
+	 *
+	 * @param $thread_id
+	 *   Thread id from which the participants should be loaded.
+	 * @param $account
+	 *   User account that should be considered when loading participants.
+	 *
+	 * @see hook_query_privatemsg_participants_alter()
+	 */
+	function trade_form_sql_participants($thread_id, $account = NULL) {
+	  $query = db_select('trade_index', 'pmi');
+	  $query->leftJoin('users', 'u', "u.uid = pmi.recipient AND pmi.type IN ('user', 'hidden')");
+	  $query
+	    ->fields('pmi', array('recipient', 'type'))
+	    ->fields('u', array('name'))
+	    ->condition('pmi.thread_id', $thread_id);
+	
+	  // If an account is provided, limit participants.
+	  if ($account) {
+	    $query->condition(db_or()
+	      ->condition('pmi.type', 'hidden', '<>')
+	      ->condition(db_and()
+	        ->condition('pmi.type', 'hidden')
+	        ->condition('pmi.recipient', $account->uid)
+	    ));
+	
+	    // Only load recipients of messages which are visible for that user.
+	    $query->where('(SELECT 1 FROM {trade_index} pmiu WHERE pmi.mid = pmiu.mid AND pmiu.recipient = :recipient LIMIT 1) = 1', array(':recipient' => $account->uid));
+	  }
+	  else {
+	    // If not, only limit participants to visible ones.
+	    $query->condition('pmi.type', 'hidden', '<>');
+	  }
+	
+	  return $query
+	    ->groupBy('pmi.recipient')
+	    ->groupBy('u.name')
+	    ->groupBy('pmi.type');
+	}
+	
+	function trade_form_list_current_node($nid) {
+	  global $user;
+	
+	 $header = array('Title', 'Subject','Sender Name', 'Date');
+	
+		
+	
+	$nirvanaQuery = db_select('trade_message', 'm');
+	 	$nirvanaQuery->join('trade_index', 't', 'm.mid = t.mid');
+		$nirvanaQuery->join('trade_relations', 'rl', 'm.mid = rl.mid');
+	   	$nirvanaQuery->condition('t.recipient', $user->uid, '=')
+			->condition('t.type', array('hidden', 'user'))
+	    		->condition('t.deleted', 0)
+	                ->condition('rl.ouser_node_id', $nid)
+	       	 	->groupBy('t.thread_id')
+	       		->fields('t', array('recipient','mid','thread_id','is_new','type','last_update'))
+			->fields('m', array('author','subject','body','timestamp','has_tokens'))
+			->fields('rl', array('ouser_node_id'))
+			->orderBy('t.last_update', 'DESC');
+	   	$results = $nirvanaQuery->execute();
+	
+	
+	
+	  # build the table fields
+	  $rows = array();
+	  foreach ($results as $row) {
+	    $tilte=node_load($row->ouser_node_id)->title;
+	    $path='trade-proposal/view/'.$row->thread_id;
+	    $rows[] = array(l($tilte,$path),
+	 				$row->subject,
+	                    ucfirst(user_load($row->author)->name),
+	                    date('d/m/Y', $row->timestamp),
+	                   
+	    );
+	  }
+	  $output = theme('table', array('header' => $header,
+	                  	         'rows' => $rows ));
+	
+	  # add the pager
+	  $output .= theme('pager');
+	
+	  if(!empty($row))
+	  {
+	  return $output;
+	  }
+	  else{
+	    return '<h4>No any proposal received yet!...<h4>';
+	  }
+	
+	
+	}
+	
+	
+	function trade_form_trade_index_mid_list($thread_id) {
+	  global $user;
+	 
+	 	$nirvanaQuery = db_select('trade_index', 't');
+	   	$nirvanaQuery->condition('t.thread_id', $thread_id, '=')
+	        ->condition('t.is_new', '0')
+	        ->distinct()
+	        ->fields('t', array('mid'));
+	        $results = $nirvanaQuery->execute();
+	
+	    return $results;
+	 }
+	
+	function trade_form_title_callback($title = NULL) {
+	  global $user;
+	  $account=$user;
+	  $count = trade_form_unread_count($account);
+	
+	  if ($count > 0) {
+	    //return format_plural($count, 'My Proposal (1 new)', 'My Proposal (@count new)');
+		//$message='My Proposal <span>'. $count.'</span>';
+	       $message = t("My Proposal <span> @name </span>", array('@name' => $count));
+		return $message;
+	  }
+	  return t('My Proposal');
+	}
+	
+	/**
+	 * Return number of unread messages for an account.
+	 *
+	 * @param $account
+	 *   Specify the user for which the unread count should be loaded.
+	 *
+	 * @ingroup api
+	 */
+	function trade_form_unread_count($account = NULL) {
+	
+	  $counts = &drupal_static(__FUNCTION__, array());
+	
+	  if (!$account || $account->uid == 0) {
+	    
+	    $account = $user;
+	  }
+	
+	  if (!isset($counts[$account->uid])) {
+	
+	
+	    $counts[$account->uid] =  _trade_form_assemble_query('unread_count', $account)
+	      ->execute()
+	      ->fetchField();
+	  }
+	  return $counts[$account->uid];
+	}
+	
+	/**
+	 * Count threads with unread messages.
+	 *
+	 * @param $account
+	 *   User account for which should be checked.
+	 *
+	 * @see hook_query_privatemsg_unread_count_alter()
+	 */
+	function trade_form_sql_unread_count($account) {
+	  $query = db_select('trade_index', 'pmi');
+	  $query->addExpression('COUNT(thread_id)', 'unread_count');
+	  return $query
+	    ->condition('pmi.deleted', 0)
+	    ->condition('pmi.is_new', 1)
+	    ->condition('pmi.recipient', $account->uid)
+	    ->condition('pmi.type', array('hidden', 'user'));
+	}
+	
+	
+	/**
+	 * Changes the read/new status of a single message.
+	 *
+	 * @param $pmid
+	 *   Message id
+	 * @param $status
+	 *   Either PRIVATEMSG_READ or PRIVATEMSG_UNREAD
+	 * @param $account
+	 *   User object, defaults to the current user
+	 */
+	function trade_form_message_change_status($pmid, $status, $account = NULL) {
+	  if (!$account) {
+	    global $user;
+	    $account = $user;
+	  }
+	  db_update('trade_index')
+	    ->fields(array('is_new' => $status))
+	    ->condition('mid', $pmid)
+	    ->condition('recipient', $account->uid)
+	    ->condition('type', array('hidden', 'user'))
+	    ->execute();
+	
+	  // Allows modules to respond to the status change.
+	  //module_invoke_all('privatemsg_message_status_changed', $pmid, $status, $account);
+	}
+	
+	
+	/**
+	 * Implements hook_user_login().
+	 */
+	function trade_form_user_login(&$edit, $account) {
+	   global $user;
+	    $account = $user;
+	if (variable_get('privatemsg_display_loginmessage', TRUE) && trade_form_user_access()) {
+	
+	    $count = trade_form_unread_count($account);
+	    if ($count) {
+	      drupal_set_message(format_plural($count, 'You have recieved<a href="@messages">1  proposal</a>.', 'You have recieved<a href="@messages">@count  proposal</a>', array('@messages' => url('trade-proposal'))));
+	 }
+	  }
+	}
+	
+	
+	
+	
+	
+	
+	/**
+	 * @file
+	 * Handles the navigation of the customer survey form
+	 * All hooks are in the .module file.
+	 */
+	
+	
+	/**
+	 * Generate a header which informs the user of which stage they're on.
+	 * 
+	 * @param type $form
+	 * @param type $form_state
+	 * @return type 
+	 */
+	function trade_form_get_header($form, &$form_state) {
+	  
+	  $form_state['stage'] = isset($form_state['stage']) ? $form_state['stage'] : 1;  
+	    
+	  $form_stages = array(
+	    'rate_the_room' => 1,
+	    'rate_the_service' => 2,
+	    
+	  ); 
+	    
+	  if (isset($form_stages[$form_state['stage']])) {
+	   $current_step = $form_stages[$form_state['stage']]; 
+	  }
+	  else {
+	   $current_step = 1;
+	  }
+	  
+	 $stages = array(
+	    1 => array('data' => '<b>1</b>
+	<span>Step</span>'),
+	    2 => array('data' => '<b>2</b>
+	<span>Step</span>'),
+	 
+	  );
+	  
+	  $stages[$current_step]['class'] = array('active');
+	  
+	 $stages[1]['class'] = array('complete');
+	  
+	  
+	  
+	  $stages_list = theme('item_list', array('items' => $stages));
+	  
+	  
+	  $form['header'] = array(
+	    '#type' => 'fieldset',
+	    '#title' => '',
+	    '#value' => $stages_list,
+            '#attributes' => array('class' => array('two-steps')),
+	  );
+	
+	  return $form;
+	  
+	}
+	
+	
+function trade_form_get_header2($form, &$form_state) {
+	  
+	  $form_state['stage'] = isset($form_state['stage']) ? $form_state['stage'] : 1;  
+	    
+	  $form_stages = array(
+	    'rate_the_room' => 1,
+        'rate_the_second' => 2,	   
+	    'rate_the_service' => 3,
+	   
+	    
+	  ); 
+	    
+	  if (isset($form_stages[$form_state['stage']])) {
+	   $current_step = $form_stages[$form_state['stage']]; 
+	  }
+	  else {
+	   $current_step = 1;
+	  }
+	  
+	 $stages = array(
+	    1 => array('data' => '<b>1</b>
+	<span>Step</span>'),
+	    2 => array('data' => '<b>2</b>
+	<span>Step</span>'),
+	 3 => array('data' => '<b>3</b>
+	<span>Step</span>'),
+	 
+	  );
+	  
+	  $stages[$current_step]['class'] = array('active');
+	  
+	 $stages[1]['class'] = array('complete');
+	  
+	  
+	  
+	  $stages_list = theme('item_list', array('items' => $stages));
+	  
+	  
+	  $form['header'] = array(
+	    '#type' => 'fieldset',
+	    '#title' => '',
+	    '#value' => $stages_list,
+            '#attributes' => array('class' => array('three-steps')),
+	  );
+	
+	  return $form;
+	  
+	}	
+	
+	
+	function trade_form_get_header1($form, &$form_state) {
+	  
+	  $form_state['stage'] = isset($form_state['stage']) ? $form_state['stage'] : 1;  
+	    
+	  $form_stages = array(
+	    'rate_the_room' => 1,
+	   
+	    
+	  ); 
+	    
+	  if (isset($form_stages[$form_state['stage']])) {
+	   $current_step = $form_stages[$form_state['stage']]; 
+	  }
+	  else {
+	   $current_step = 1;
+	  }
+	  
+	 $stages = array(
+	    1 => array('data' => '<b>1</b>
+	<span>Step</span>')
+	   
+	  );
+	  
+	  $stages[$current_step]['class'] = array('active');
+	  
+	 $stages[1]['class'] = array('complete');
+	  
+	  
+	  
+	  $stages_list = theme('item_list', array('items' => $stages));
+	  
+	  
+	  $form['header'] = array(
+	    '#type' => 'fieldset',
+	    '#title' => '',
+	    '#value' => $stages_list,
+            '#attributes' => array('class' => array('one-steps')),
+	  );
+	
+	  return $form;
+	  
+	}
+	
+	
+	
+	/**
+	 * Given the current stage the user is on, calculate what the next step would be
+	 * 
+	 * @param type $form_state
+	 * @return string 
+	 */
+	function trade_form_move_to_next_stage($form, &$form_state) {
+         $nodeid=@$_GET['proposalsend'];
+	  $wish_node   = node_load( $nodeid);
+          if(($wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Trade')){
+
+            switch ($form_state['stage']) {
+	    case 'rate_the_room':
+	      return 'rate_the_second';
+	     break;
+           case 'rate_the_second':
+              return 'rate_the_service';
+            break; 
+           }
+           } else{
+	  switch ($form_state['stage']) {
+	    case 'rate_the_room':
+	      return 'rate_the_service';
+	      
+	     break;
+	
+	    
+	  }
+        }
+	
+	}
+	
+	
+	/**
+	 * Given the current stage the user is on, calculate what the previous step
+	 * would be
+	 * 
+	 * @param type $form_state
+	 * @return string 
+	 */
+	
+	function trade_form_move_to_previous_stage($form, &$form_state) {
+	 $nodeid=@$_GET['proposalsend'];
+	  $wish_node   = node_load( $nodeid);
+          if(($wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Trade')){
+
+            switch ($form_state['stage']) {
+	    case 'rate_the_service':
+	      return 'rate_the_second';
+	     break;
+           case 'rate_the_second':
+               return 'rate_the_room';
+            break; 
+           }
+           } else{
+	  switch ($form_state['stage']) {
+	    case 'rate_the_service':
+	      return 'rate_the_room';
+	     break;
+	
+	    }
+	  }
+	    
+	}
+	
+	
+	
+	
+	
+	/**
+	 * @file
+	 * Handles the form elements of the customer survey form
+	 * All hooks are in the .module file.
+	 */
+	
+	/**
+	 * Master form which calls an individual form for each step.
+	 * 
+	 * @see trade_form_form_validate().
+	 * @see trade_form_form_submit().
+	 * 
+	 * @param type $form
+	 * @param string $form_state
+	 * @return type 
+	 */
+	function trade_form_form($form, &$form_state) {
+	     
+	  
+	
+	  if (!isset($form_state['stage'])) $form_state['stage'] = 'rate_the_room';
+	 
+	  $form = array();
+	
+	  $nodeid=@$_GET['proposalsend'];
+	  $wish_node   = node_load( $nodeid);
+	  
+	 if((@$wish_node->field_type['und'][0] ['value']=='offer')&& (@$wish_node->field_deal_agreement['und'][0]['value']=='Free' ||  @$wish_node->field_deal_agreement['und'][0]['value']=='Share: Borrow/ Lend')){
+	  $form = trade_form_get_header1($form, $form_state);
+	  switch ($form_state['stage']) {
+	    
+	    case 'rate_the_room':
+	      return trade_form_rate_the_room_form($form, $form_state);
+	     break;  
+	 
+	   
+	    default:
+	      return trade_form_rate_the_room_form($form, $form_state);
+	     break; 
+	   }
+	  
+	  }else if((@$wish_node->field_type['und'][0] ['value']=='wish')&& (@$wish_node->field_deal_agreement['und'][0]['value']=='Trade')){
+	  	 $form = trade_form_get_header2($form, $form_state);
+	  switch ($form_state['stage']) {
+	    
+	    case 'rate_the_room':
+	      return trade_form_rate_the_room_form($form, $form_state);
+	     break;  
+	    case 'rate_the_second':
+	      return trade_form_rate_the_room_form($form, $form_state);
+	     break; 
+	   case 'rate_the_service': 
+	      return trade_form_rate_the_service_form($form, $form_state);  
+	     break;
+	    default:
+	      return trade_form_rate_the_room_form($form, $form_state);
+	     break; 
+	   }
+	  }
+	  else{
+	    $form = trade_form_get_header($form, $form_state);
+	    switch ($form_state['stage']) {
+	    
+	    case 'rate_the_room':
+	      return trade_form_rate_the_room_form($form, $form_state);
+	     break;  
+	 
+	    case 'rate_the_service': 
+	      return trade_form_rate_the_service_form($form, $form_state);  
+	     break;
+	 
+	
+	 
+	    default:
+	      return trade_form_rate_the_room_form($form, $form_state);
+	     break; 
+	    }
+	  }
+	  return $form;
+	    
+	}
+	
+	
+	/**
+	 * Form for the rate_the_room step.
+	 * 
+	 * @see trade_form_form().
+	 *  
+	 * @param type $form
+	 * @param type $form_state
+	 * @return type 
+	 */
+	
+	
+	
+	/**
+	 * Form for the rate_the_service step.
+	 * 
+	 * @see trade_form_form().
+	 *  
+	 * @param type $form
+	 * @param type $form_state
+	 * @return type 
+	 */
+	function trade_form_rate_the_service_form($form, &$form_state) {
+	      global $user;
+	  
+	    $nodeid=@$_GET['proposalsend'];
+	    $wish_node   = node_load( $nodeid);
+	    $toppings1=trade_form_current_node($nodeid);
+		$p_location='';
+		$p_messages='';
+		$p_dates_time='';
+		if(($wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Trade')){
+			   $values = isset($form_state['multistep_values']['rate_the_second']) ? $form_state['multistep_values']['rate_the_second'] : $form_state['multistep_values']['rate_the_second'];
+	   }
+	   else{
+		$values = isset($form_state['multistep_values']['rate_the_room']) ? $form_state['multistep_values']['rate_the_room'] : array();
+	   }
+
+		$p_location=trade_form_proposal_location($nodeid, $user->uid,$order='DESC');
+		$p_messages=trade_form_proposal_messages($nodeid, $user->uid,$order='DESC');
+		$p_dates_time=trade_form_proposal_dates_time($nodeid, $user->uid,$order='DESC');
+		
+	   $indexes=array();
+	   $indexes_title=array();
+	   $locations=array();
+	   $trade_form_date_time_format=array();
+	   $date='';
+	    foreach($values['cuser_node_id'] as $key=>$value):
+	    if($value>0){
+	        $nodes= node_load($value);
+	        $indexes[$value] = $value;
+	        $indexes_title[$value]=$nodes->title;
+	       if(!empty($nodes->field_meet_up_date_avai))
+	       {
+	         $date=trade_form_field_meet_up_date_avai($nodes->field_meet_up_date_avai);
+	         $trade_form_date_time_format[]=$date;
+	       }
+	
+	        $valuess=address_format($nodes->field_meet_up_location);
+		if($valuess!='')
+		 {
+	          $locations[$valuess] =  $valuess;
+		 }
+	    }
+	    endforeach;
+	    
+	    
+	    $field_meet_up_location=(user_load($wish_node->uid)->field_meet_up_location);
+	
+	      $recipient_loacation= address_format($field_meet_up_location);
+	      $loacation_option ="user_$wish_node->uid";
+	      
+	      $locations[$loacation_option] =  $recipient_loacation;
+	
+	      @$author_loacation= address_format(user_load($user->uid)->field_meet_up_location);
+	      $loacation_option = "user_$user->uid";
+	      $locations[$loacation_option] =  $author_loacation;
+	      
+	    
+	   $ouser_node_offers_id=array();
+	   $ouser_node_offers_id_title=array();
+	   if(isset($values['ouser_node_offers_id']))
+	   {
+	    foreach($values['ouser_node_offers_id'] as $key=>$value):
+	    
+	    if($value>0){
+	      
+	        $node1= node_load($value);
+	        
+	       
+	        $date=trade_form_field_meet_up_date_avai($node1->field_meet_up_date_avai);
+	        
+	        $trade_form_date_time_format[]=$date;
+	        
+	        $ouser_node_offers_id[$value] = $value;
+	        $ouser_node_offers_id_title[$value]=node_load($value)->title;
+	      
+	        $valuess=address_format($node1->field_meet_up_location);
+	      	if($valuess!='')
+	      	{
+	                    	 
+	                 $locations[$valuess] =  $valuess;
+	      	}
+	    }
+	    endforeach;
+	  }
+	  
+	  
+	    
+	
+	      
+	    
+	    $wish_node=node_load($nodeid);
+	    $user_name= ucfirst(user_load($wish_node->uid)->name);
+	  
+	  $cuser_name=ucfirst(user_load($user->uid)->name);
+	   $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	                Choose a date and a meetup location.
+	           </h2>',
+	        );
+	         
+	     if(($wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Free' ||  $wish_node->field_deal_agreement['und'][0]['value']=='Share: Borrow/ Lend')){
+	        if(isset($values['ouser_node_id'])){ 
+	           $form['rate_the_service']['ouser_node_id'] = array(
+	          '#title' => t("<h3>$user_name Wishes<span>*</span></h3>"),
+	          '#type' => 'checkboxes',
+	          '#options' => $toppings1,
+	          '#required' => true,
+	          '#default_value' => array($nodeid),
+	          '#attributes' => array('class' => array('trade_offer_check')),
+	          );
+	        }
+	        }
+	   else{
+	    $form['rate_the_service']['ouser_node_offers_id'] = array(
+	      '#title' => t("<h3>$user_name Offers<span>*</span></h3>"),
+	      '#type' => 'checkboxes',
+	      '#required' => true,
+	      '#options' => $ouser_node_offers_id_title,
+	      '#default_value' => $ouser_node_offers_id,
+	      '#attributes' => array('class' => array('trade_offer_check')),
+	    );
+	   }
+	     $form['rate_the_service']['cuser_node_id'] = array(
+	      '#title' => t("<h3>$cuser_name Offers<span>*</span></h3>"),
+	      '#type' => 'checkboxes',
+	      '#options' => $indexes_title,
+	      '#required' => true,
+	      '#default_value' => $indexes,
+	      '#attributes' => array('class' => array('trade_offer_check')),
+	    );
+	   
+	    
+	      trade_form_ini($locations);
+		  
+	    $form['rate_the_service']['location'] = array(
+	           '#title' => t("<h3>Location</h3>"),
+	         '#type' => 'textarea',
+			 '#default_value' => $p_location,
+	         '#attributes' => array('id' => array('altFieldlocaltion')),);
+	    
+	    
+	    $form['rate_the_service']['date'] = array(
+	      '#title' => t("<h3>Date Time</h3>"),
+	      '#type' => 'textarea', 
+	       '#default_value' => $p_dates_time,
+	      '#attributes' => array('id' => array('altField')),);
+	 
+	  
+	    $form['rate_the_service']['message'] = array(
+	           '#title' => t("<h3>Message</h3>"),
+	       '#type' => 'textarea',
+		    '#default_value' => $p_messages,
+	       '#attributes' => array('id' => array('proposal_message')),);
+	    
+	    $array=trade_form_date_widget_format($trade_form_date_time_format);
+	    drupal_add_js(drupal_get_path('module', 'trade_form') . '/jquery-ui.js');
+	    drupal_add_css(drupal_get_path('module', 'trade_form') . '/jquery-ui.css');
+	    drupal_add_js(drupal_get_path('module', 'trade_form') . '/jquery.datePicker.js');
+	    drupal_add_js('var $j = jQuery.noConflict();
+	     $j(document).ready(function() {
+	     var array = ['.implode(",",$array).'];
+	     $j("#fromDate").multiDatesPicker({
+	      altField: "#altField",
+	        dateFormat: "yy-mm-dd",
+	       beforeShowDay: function(date) {
+	      if($j.inArray($j.datepicker.formatDate("yy-mm-dd", date ), array) > -1)
+	      {
+	        return [true,"event","Available"];
+	      }
+	      else
+	      {
+	        return [false,"","Not Available"];
+	      }
+	    }
+	    });
+	 
+	});','inline');
+	  $form['rate_the_service']['back'] = array(
+	    '#type' => 'submit',
+	    '#value' => t('Back')
+	  );
+	  
+	  $form['rate_the_service']['next'] = array(
+	    '#type' => 'submit',
+	    '#value' => t('Send Proposal'),
+	     '#attributes'=>array('class' => array('proposal_button_right', 'btn  ', 'btn-big','btn-green')),
+	  );
+	    $form['rate_the_service']['#theme'][] = 'trade_form_form';
+	  return $form;
+	}
+	
+	
+	function address_format($field_meet_up_location)
+	{
+	
+	
+	if(!empty($field_meet_up_location)){
+	  $addres_format=$field_meet_up_location['und'];
+	
+	foreach ($addres_format as $key => $values )
+	{
+	  if(isset($values['data']))
+	  {
+	  $values=unserialize($values['data']);
+	  $address=$values['formatted_address'];
+	  }
+	  else{
+	   $address=$values['organisation_name'].' '.$values['thoroughfare'].' '.$values['locality'].' '.$values['premise'].' ';
+	   $address.=$values['administrative_area'].' '.$values['country'].' '.$values['postal_code'];
+	  }
+	}
+	return $address;
+	}
+	else{
+	  
+	  return false;
+	}
+	}
+	
+	function trade_form_date_widget_format($field_meet_up_date_avai)
+	{
+	  $array=array();
+	         if(!empty($field_meet_up_date_avai))
+	         {
+	           foreach($field_meet_up_date_avai as $field_meet_up_date_availability){
+	            //  $str=strtotime($field_meet_up_date_availability);
+	            if(!empty($field_meet_up_date_availability))
+	            {
+	                 foreach($field_meet_up_date_availability as $field_meet_up_date_availabilitys)
+	                  
+	                   if($field_meet_up_date_availabilitys!='')
+	                   {
+	                   $array[]=trim($field_meet_up_date_availabilitys);
+	                 }
+	               } 
+	             }
+	     }
+	     return $array;
+	}
+	
+	function trade_form_date_time_format($field_meet_up_date_and_time_avai)
+	{
+	
+	   //$default = 'D, m/d/Y - H:i';
+	if(!empty($field_meet_up_date_and_time_avai)){
+	  $date_format=$field_meet_up_date_and_time_avai['und'];
+	
+	foreach ($date_format as $key => $values )
+	{
+	  if(isset($values['value']))
+	  {
+	  
+	  $date=$values['value'];
+	  }
+	  
+	}
+	return $date;
+	}
+	else{
+	  
+	  return false;
+	}
+	}
+	
+	function trade_form_field_meet_up_date_avai($field_meet_up_date_and_time_avai)
+	{
+	    $array=array();
+	
+	   //$default = 'D, m/d/Y - H:i';
+	if(!empty($field_meet_up_date_and_time_avai)){
+	  $date_format=$field_meet_up_date_and_time_avai['und'];
+	
+	foreach ($date_format as $key => $values )
+	{
+	  if(isset($values['value']))
+	  {
+	  
+	  $date=$values['value'];
+	    $array[]='"'.date('Y-m-d', $date).'"';
+	  }
+	  
+	}
+	return $array;
+	}
+	else{
+	  
+	  return false;
+	}
+	}
+	
+	function modify_proposal($form, &$form_state, $recipients_user = '', $subject = '', $thread_id = '', $ouser_node_id,$author_uid, $read_all = FALSE)
+	{
+	 global $user;
+	 $user_uid=$author_uid;
+	$form = array();
+	
+	     $p_location=trade_form_proposal_location($ouser_node_id, $user_uid,$order='DESC');
+		 $p_messages=trade_form_proposal_messages($ouser_node_id, $user_uid,$order='DESC');
+		 $p_dates_time=trade_form_proposal_dates_time($ouser_node_id, $user_uid,$order='DESC');
+	
+	$form['recipients'] = array(
+	             '#type' => 'value',
+	             '#value' => $recipients_user,
+	           );
+	     
+	$form['thread_id'] = array(
+	      '#type' => 'value',
+	      '#value' => $thread_id,
+	    );
+	$form['author_uid'] = array(
+	      '#type' => 'value',
+	      '#value' => $author_uid,
+	    );
+	 $form['subject'] = array(
+	      '#type' => 'value',
+	      '#default_value' => $subject,
+	    );
+	 $form['proposal_id'] = array(
+	      '#type' => 'value',
+	      '#default_value' => $ouser_node_id,
+	    );
+	
+	  $wish_node=(node_load($ouser_node_id));
+	  $wish_node->field_deal_agreement['und'][0]['value']=='Free';
+	
+	   $deal_agreement= $wish_node->field_deal_agreement['und'][0] ['value']."," ;
+	   $deal_agreement .= "Free";
+	 
+	   $toppings =trade_form_my_offer($user_uid,$wish_node->field_type['und'][0] ['value'],$deal_agreement);
+	  
+	   $toppings1=trade_form_current_node($ouser_node_id);
+	   $user_name=ucfirst(trade_form_current_node_user_name($ouser_node_id));
+	   $current_node_user_offer=trade_form_current_node_user_offer($ouser_node_id,$deal_agreement);
+	   
+	   $node = node_load($ouser_node_id);
+	   $title = $node->title;
+	   $mid=trade_form_mid($ouser_node_id, $user_uid);
+	   $trade_relations=trade_form_trade_relations_value($ouser_node_id, $user_uid,$mid);
+	   
+	    $indexes=array();
+	    foreach($trade_relations as $key=>$value):
+	        $indexes[$value->cuser_node_id] = $value->cuser_node_id;
+	    endforeach;
+	
+	  # the drupal checkboxes form field definition
+	 
+	  $cuser_name=ucfirst(user_load($user_uid)->name);
+	  
+	      $locations =array();
+	      $author_loacation='';
+	      $trade_form_date_time_format=array();
+	      $date='';
+	      $valuess=@address_format($wish_node->field_meet_up_location);
+	      $loacation_option ="node_$wish_node->nid";
+	      $locations[$loacation_option] =  $valuess;
+	      
+	      
+	      $field_meet_up_location=(user_load($wish_node->uid)->field_meet_up_location);
+	      
+	      $recipient_loacation= address_format($field_meet_up_location);
+	      $loacation_option ="user_$wish_node->uid";
+	      
+	      $locations[$loacation_option] =  $recipient_loacation;
+	
+	      @$author_loacation= address_format(user_load($user->uid)->field_meet_up_location);
+	      $loacation_option = "user_$user->uid";
+	      $locations[$loacation_option] =  $author_loacation;
+	
+	      $date=trade_form_field_meet_up_date_avai($wish_node->field_meet_up_date_avai);
+	      $trade_form_date_time_format[]=$date;
+	  
+	  
+	      
+	      
+	 if(($wish_node->field_type['und'][0] ['value']=='offer' || $wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Free' || $wish_node->field_deal_agreement['und'][0]['value']=='Share: Borrow/ Lend'))
+	    {
+	     $types=ucfirst($wish_node->field_type['und'][0]['value']);
+	     if(($wish_node->field_type['und'][0] ['value']=='offer')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Free' || $wish_node->field_deal_agreement['und'][0]['value']=='Share: Borrow/ Lend')){
+	      $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	                Choose a date and a meetup location.
+	           </h2>',
+	        );
+	      }
+	      if(($wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Free' )){
+	      $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	                 What do you have to fulfil this wish?
+	           </h2>',
+	        );
+	      }
+	      else if(($wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Share: Borrow/ Lend')){
+	      $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	                What do you have to fulfil this share request?
+	           </h2>',
+	        );
+	      }
+	      $form['ouser_node_id'] = array(
+	        '#title' => t("<h3>$user_name $types<span>*</span></h3>"),
+	        '#type' => 'checkboxes',
+	        '#options' => $toppings1,
+	        '#required' => true,
+	        '#default_value' => array($ouser_node_id),
+	        '#attributes' => array('class' => array('trade_offer_check')),
+	      );
+	     
+	      if($wish_node->field_type['und'][0] ['value']=='wish')
+	      {
+	      $cuser_name=ucfirst(user_load($user_uid)->name);
+	       $form['cuser_node_id'] = array(
+	         '#title' => t("<h3>$cuser_name Offers<span>*</span></h3>"),
+	         '#type' => 'checkboxes',
+	         '#options' => $toppings,
+	         '#required' => true,
+	         '#default_value' => $indexes,
+	         '#attributes' => array('class' => array('trade_offer_check')),
+	       );
+	      }
+	    }
+	    else{
+	      
+	      if(($wish_node->field_type['und'][0] ['value']=='wish')&& ($wish_node->field_deal_agreement['und'][0]['value']=='Trade'))
+	      {
+	        $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	              What do you have to fulfil this wish? <br/>
+	              What would you like in return as a trade?
+	           </h2>',
+	        );
+	      }
+	      else{
+	    $form['html'] = array(
+	       '#type' => 'markup',
+	        '#markup' => '<h2 style="  border-bottom: 2px solid #63bd6b; font-weight: normal; line-height: 20px; margin: 0 0 13px; overflow: hidden;">
+	                What do you have to offer as a trade?  Try to pick something they are wishing for.  Or you can send them an invitation to choose for themselves???
+	           </h2>',
+	        );
+	      }
+	  $cuser_name=ucfirst(user_load($user_uid)->name);
+	    $form['cuser_node_id'] = array(
+	      '#title' => t("<h3>$cuser_name Offers<span>*</span></h3>"),
+	      '#type' => 'checkboxes',
+	      '#options' => $toppings,
+	      '#required' => true,
+	      '#default_value' => $indexes,
+	      '#attributes' => array('class' => array('trade_offer_check1')),
+	    );
+	     $current_node_user_wish=trade_form_current_node_user_wish($ouser_node_id,$deal_agreement);
+	        $trade_form_wish_mid= trade_form_wish_mid($ouser_node_id, $user_uid);
+			 
+			  /*$form['rate_the_room']['ouser_node_id'] = array(
+	            '#title' => t("<h3>$user_name Wishes<span>*</span></h3>"),
+	            '#type' => 'radio',
+	            '#options' => array('1'=>'sdf','2'=>'sdfsadf'),
+	            '#required' => true,
+	            '#attributes' => array('class' => array('trade_offer_check')),
+	          );*/
+			 
+			  
+	    	 $form['ouser_node_id'] = array(
+				'#type' => 'radios',
+				'#title' => t("<h3>$user_name Wishes<span>*</span></h3>"),
+				'#options' => $current_node_user_wish,
+				'#required' => true,
+				'#default_value' => $trade_form_wish_mid,
+				'#attributes' => array('class' => array('ouser_node_id'))
+				);
+			 
+			 
+	   
+	    $form['ouser_node_offers_id'] = array(
+	      '#title' => t("<h3>$user_name Offers<span>*</span></h3>"),
+	      '#type' => 'checkboxes',
+	      '#required' => true,
+	      '#options' => $current_node_user_offer,
+	      '#default_value' => $indexes,
+	      '#attributes' => array('class' => array('trade_offer_check3')),
+	    );
+	    
+	    }
+	    
+	   $form['location'] = array(
+	           '#title' => t("<h3>Location</h3>"),
+	         '#type' => 'value',
+			 '#default_value' => $p_location,
+	         '#attributes' => array('id' => array('altFieldlocaltion')),);
+	    $form['date'] = array(
+	      '#title' => t("<h3>Date Time</h3>"),
+	      '#type' => 'value', 
+	       '#default_value' => $p_dates_time,
+	      '#attributes' => array('id' => array('altField')),);
+	 
+	  
+	    $form['message'] = array(
+	           '#title' => t("<h3>Message</h3>"),
+	       '#type' => 'value',
+		    '#default_value' => $p_messages,
+	       '#attributes' => array('id' => array('proposal_message')),);
+	
+	
+	
+	
+	    $form['next'] = array(
+	           '#type' => 'submit',
+	           '#value' => t('Modify Proposal'),
+	           '#weight' => 10,
+	           '#validate' => array('trade_form_form_validate'),
+	     '#ajax' => array(
+	          'callback' => 'ajax_trade_form_modify_callback',
+	          
+	          
+	        ),
+	       );
+	     $form['status'] = array(
+	      '#markup' => '<div id="progress-status"></div>',
+	    );
+	
+	   // $form['#theme'][] = 'modify_proposal';
+	
+	
+	  return $form;
+	}
+	
+	function trade_form_ini($locations)
+	{
+	 
+	   
+	    $array=array();
+	   
+	     foreach($locations as   $address)
+	    {
+	      
+	        $prepAddr = str_replace(' ','+',$address);
+	        $geocode=file_get_contents('http://maps.google.com/maps/api/geocode/json?address='.$prepAddr.'&sensor=false');
+	        $output= json_decode($geocode);
+	       if($output->status!='ZERO_RESULTS'){
+	        $latitude =@$output->results[0]->geometry->location->lat;
+	        $longitude = @$output->results[0]->geometry->location->lng;
+	        $array[]="['".$address."',".$latitude.",".$longitude."]";
+	       }
+	    }
+	  drupal_add_js("var map;
+	    		var var_location = new google.maps.LatLng(49.2642522, -123.1710854);
+	//var var_location = new google.maps.LatLng(-33.92, 151.25);
+				var locations = [
+				".implode(',',$array)."
+				];
+	
+	     function map_init() {		 	
+				
+	            var var_mapoptions = {
+	              center: var_location,
+	              zoom: 3,
+	              mapTypeId: google.maps.MapTypeId.ROADMAP,
+	              mapTypeControl: false,
+	              panControl:false,
+	              rotateControl:false,
+	              streetViewControl: false,
+	            };
+	            map = new google.maps.Map(document.getElementById('map-container'),
+	                var_mapoptions);
+	       
+	           var infowindow = new google.maps.InfoWindow();
+	
+				var marker, i;
+			
+				for (i = 0; i < locations.length; i++) {  
+				  marker = new google.maps.Marker({
+					position: new google.maps.LatLng(locations[i][1], locations[i][2]),
+					map: map
+				  });
+			
+				  google.maps.event.addListener(marker, 'click', (function(marker, i) {
+					return function() {
+					
+	                var x;
+	                
+	                
+	                      document.getElementById('altFieldlocaltion').value = locations[i][0];
+	                      infowindow.setContent(locations[i][0]);
+	                     
+	                 
+					  
+					  infowindow.open(map, marker);
+	                  
+					  
+					}
+				  })(marker, i));
+				}
+	      }
+	
+	          google.maps.event.addDomListener(window, 'load', map_init);
+	      
+	      //start of modal google map
+	      $('#mapmodals').on('shown.bs.modal', function () {
+	          google.maps.event.trigger(map, 'resize');
+	          map.setCenter(var_location);
+	      });",'inline');
+	  
+	}
