@@ -1,4 +1,4 @@
-# delete_user
+# Delete user in drupal 7
 -- SUMMARY --
 
 This module is created  to so that users can delete their profiles.
